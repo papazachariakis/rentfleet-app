@@ -1,0 +1,738 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_URL")
+  extensions = [postgis, btree_gist]
+}
+
+enum OrganizationRole {
+  OWNER
+  MANAGER
+  STAFF
+  DRIVER
+}
+
+enum VehicleStatus {
+  AVAILABLE
+  RENTED
+  MAINTENANCE
+  OUT_OF_SERVICE
+}
+
+enum FuelType {
+  PETROL
+  DIESEL
+  HYBRID
+  ELECTRIC
+  LPG
+  CNG
+}
+
+enum TransmissionType {
+  MANUAL
+  AUTOMATIC
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  PARTIALLY_PAID
+  REFUNDED
+  FAILED
+}
+
+enum PaymentProvider {
+  STRIPE
+}
+
+enum DocumentType {
+  ID_CARD
+  PASSPORT
+  DRIVER_LICENSE
+  OTHER
+}
+
+enum FuelLevel {
+  EMPTY
+  QUARTER
+  HALF
+  THREE_QUARTER
+  FULL
+}
+
+enum ChecklistItemStatus {
+  OK
+  DAMAGED
+  MISSING
+  NOT_APPLICABLE
+}
+
+enum ContractStatus {
+  DRAFT
+  PENDING_SIGNATURE
+  SIGNED
+  VOID
+}
+
+enum DeviceType {
+  GPS
+  OBD2
+}
+
+enum TelemetryProvider {
+  GENERIC
+  TELTONIKA
+  RUFAWAY
+  AUTOFLEET
+  OTHER
+}
+
+enum FaultSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum FaultStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+enum MaintenanceTaskStatus {
+  OPEN
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum AuditAction {
+  ORG_CREATED
+  USER_INVITED
+  USER_JOINED
+  VEHICLE_STATUS_CHANGED
+  BOOKING_CREATED
+  BOOKING_CONFIRMED
+  BOOKING_CANCELLED
+  CONTRACT_SENT
+  CONTRACT_SIGNED
+  PAYMENT_SUCCEEDED
+  PAYMENT_REFUNDED
+  CUSTOMER_BLACKLISTED
+  CUSTOMER_UNBLACKLISTED
+  GEOFENCE_ALERT
+  DEVICE_LINKED
+  FAULT_CREATED
+  DEVICE_API_KEY_REVOKED
+}
+
+model User {
+  id              String    @id @default(uuid())
+  name            String?
+  email           String    @unique
+  emailVerified   Boolean   @default(false)
+  image           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  sessions        Session[]
+  accounts        Account[]
+  members         Member[]
+  invitations     Invitation[]      @relation("InvitationsInviter")
+  auditLogs       AuditLog[]
+  contractsSigned Contract[]        @relation("ContractsSignedBy")
+  checklistsDone  RentalChecklist[] @relation("ChecklistDoneBy")
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Account {
+  id                    String    @id @default(uuid())
+  userId                String
+  accountId             String
+  providerId            String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  logo      String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members          Member[]
+  invitations      Invitation[]
+  customers        Customer[]
+  vehicles         Vehicle[]
+  bookings         Booking[]
+  payments         Payment[]
+  contracts        Contract[]
+  publicBooking    PublicBookingConfig?
+  devices          Device[]
+  geofences        Geofence[]
+  auditLogs        AuditLog[]
+  maintenanceTasks MaintenanceTask[]
+}
+
+model Member {
+  id             String           @id @default(uuid())
+  organizationId String
+  userId         String
+  role           OrganizationRole @default(STAFF)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+model Invitation {
+  id             String           @id @default(uuid())
+  organizationId String
+  email          String
+  role           OrganizationRole @default(STAFF)
+  status         String           @default("pending")
+  expiresAt      DateTime
+  inviterId      String
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  inviter      User         @relation("InvitationsInviter", fields: [inviterId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@index([email])
+}
+
+model Vehicle {
+  id               String          @id @default(uuid())
+  organizationId   String
+  plateNumber      String
+  vin              String?         @unique
+  make             String
+  model            String
+  year             Int
+  category         String
+  fuelType         FuelType
+  transmission     TransmissionType
+  seats            Int
+  color            String?
+  status           VehicleStatus   @default(AVAILABLE)
+  dailyPrice       Decimal         @db.Decimal(10, 2)
+  weeklyPrice      Decimal?        @db.Decimal(10, 2)
+  monthlyPrice     Decimal?        @db.Decimal(10, 2)
+  insuranceExpiry  DateTime?
+  ktaoExpiry       DateTime?
+  roadTaxExpiry    DateTime?
+  currentOdometer  Int             @default(0)
+  lastOdometerAt   DateTime?
+  notes            String?         @db.Text
+  deletedAt        DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  photos           VehiclePhoto[]
+  services         VehicleService[]
+  bookings         Booking[]
+  device           Device?
+  positions        VehiclePosition[]
+  telemetry        VehicleTelemetry[]
+  faults           VehicleFault[]
+  maintenanceTasks MaintenanceTask[]
+
+  @@unique([organizationId, plateNumber])
+  @@index([organizationId, status])
+  @@index([organizationId, deletedAt])
+}
+
+model VehiclePhoto {
+  id             String   @id @default(uuid())
+  organizationId String
+  vehicleId      String
+  blobKey        String
+  url            String
+  isCover        Boolean  @default(false)
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId])
+  @@index([organizationId])
+}
+
+model VehicleService {
+  id                String    @id @default(uuid())
+  organizationId    String
+  vehicleId         String
+  serviceDate       DateTime
+  odometerAtService Int
+  description       String    @db.Text
+  cost              Decimal?  @db.Decimal(10, 2)
+  nextDueDate       DateTime?
+  nextDueOdometer   Int?
+  performedBy       String?
+  invoiceBlobKey    String?
+  invoiceUrl        String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId, serviceDate])
+  @@index([organizationId])
+}
+
+model Customer {
+  id                String    @id @default(uuid())
+  organizationId    String
+  firstName         String
+  lastName          String
+  email             String?
+  phone             String
+  address           String?
+  city              String?
+  postalCode        String?
+  country           String    @default("GR")
+  dateOfBirth       DateTime?
+  licenseNumber     String?
+  licenseIssueDate  DateTime?
+  licenseExpiryDate DateTime?
+  licenseCountry    String?
+  idNumber          String?
+  passportNumber    String?
+  isBlacklisted     Boolean   @default(false)
+  blacklistReason   String?   @db.Text
+  notes             String?   @db.Text
+  deletedAt         DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  documents    CustomerDocument[]
+  bookings     Booking[]
+
+  @@index([organizationId])
+  @@index([organizationId, phone])
+  @@index([organizationId, email])
+  @@index([organizationId, deletedAt])
+}
+
+model CustomerDocument {
+  id             String       @id @default(uuid())
+  organizationId String
+  customerId     String
+  type           DocumentType
+  blobKey        String
+  url            String
+  fileName       String
+  mimeType       String
+  sizeBytes      Int
+  uploadedAt     DateTime     @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([organizationId])
+}
+
+model Booking {
+  id                String        @id @default(uuid())
+  organizationId    String
+  customerId        String
+  vehicleId         String
+  bookingNumber     String        @unique
+  status            BookingStatus @default(PENDING)
+  pickupDate        DateTime
+  returnDate        DateTime
+  pickupLocation    String?
+  returnLocation    String?
+  pickupTime        String?
+  returnTime        String?
+  dailyRateSnapshot Decimal       @db.Decimal(10, 2)
+  subtotal          Decimal       @db.Decimal(10, 2)
+  extrasTotal       Decimal       @default(0) @db.Decimal(10, 2)
+  discountTotal     Decimal       @default(0) @db.Decimal(10, 2)
+  taxTotal          Decimal       @default(0) @db.Decimal(10, 2)
+  totalAmount       Decimal       @db.Decimal(10, 2)
+  depositAmount     Decimal       @default(0) @db.Decimal(10, 2)
+  currency          String        @default("EUR")
+  source            String        @default("INTERNAL")
+  notes             String?       @db.Text
+  cancelledAt       DateTime?
+  cancelledReason   String?       @db.Text
+  completedAt       DateTime?
+  deletedAt         DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer        Customer         @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  vehicle         Vehicle          @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  extras          BookingExtra[]
+  payments        Payment[]
+  contract        Contract?
+  pickupChecklist RentalChecklist? @relation("PickupChecklist")
+  returnChecklist RentalChecklist? @relation("ReturnChecklist")
+
+  @@index([organizationId, status])
+  @@index([organizationId, pickupDate, returnDate])
+  @@index([vehicleId, pickupDate, returnDate])
+  @@index([customerId])
+  @@index([organizationId, deletedAt])
+}
+
+model BookingExtra {
+  id             String   @id @default(uuid())
+  organizationId String
+  bookingId      String
+  code           String
+  nameEl         String
+  nameEn         String
+  quantity       Int      @default(1)
+  unitPrice      Decimal  @db.Decimal(10, 2)
+  totalPrice     Decimal  @db.Decimal(10, 2)
+  createdAt      DateTime @default(now())
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId])
+  @@index([organizationId])
+}
+
+model RentalChecklist {
+  id                      String    @id @default(uuid())
+  organizationId          String
+  bookingId               String    @unique
+  type                    String
+  doneById                String?
+  doneAt                  DateTime  @default(now())
+  fuelLevel               FuelLevel
+  odometerReading         Int
+  notes                   String?   @db.Text
+  customerSignatureBlobKey String?
+  customerSignatureUrl     String?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  booking       Booking           @relation("PickupChecklist", fields: [bookingId], references: [id], onDelete: Cascade, map: "pickup_checklist_booking_fkey")
+  bookingReturn Booking?          @relation("ReturnChecklist", fields: [bookingId], references: [id], onDelete: Cascade, map: "return_checklist_booking_fkey")
+  doneBy        User?             @relation("ChecklistDoneBy", fields: [doneById], references: [id], onDelete: SetNull)
+  items         ChecklistItem[]
+  damagePhotos  DamagePhoto[]
+
+  @@index([organizationId])
+}
+
+model ChecklistItem {
+  id             String              @id @default(uuid())
+  organizationId String
+  checklistId    String
+  labelEl        String
+  labelEn        String
+  status         ChecklistItemStatus @default(OK)
+  notes          String?             @db.Text
+  createdAt      DateTime            @default(now())
+
+  checklist RentalChecklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+
+  @@index([checklistId])
+  @@index([organizationId])
+}
+
+model DamagePhoto {
+  id             String   @id @default(uuid())
+  organizationId String
+  checklistId    String
+  blobKey        String
+  url            String
+  description    String?
+  createdAt      DateTime @default(now())
+
+  checklist RentalChecklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+
+  @@index([checklistId])
+  @@index([organizationId])
+}
+
+model Contract {
+  id                String         @id @default(uuid())
+  organizationId    String
+  bookingId         String         @unique
+  contractNumber    String         @unique
+  status            ContractStatus @default(DRAFT)
+  language          String         @default("el")
+  templateVersion   String         @default("v1")
+  pdfBlobKey        String?
+  pdfUrl            String?
+  htmlSnapshot      String?        @db.Text
+  sentAt            DateTime?
+  signedAt          DateTime?
+  signedByName      String?
+  signedByIp        String?
+  signedByUserAgent String?
+  signedById        String
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  booking      Booking      @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  signedBy     User         @relation("ContractsSignedBy", fields: [signedById], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+}
+
+model Payment {
+  id                   String          @id @default(uuid())
+  organizationId       String
+  bookingId            String
+  provider             PaymentProvider @default(STRIPE)
+  stripePaymentIntentId String?        @unique
+  stripeChargeId       String?
+  amount               Decimal         @db.Decimal(10, 2)
+  currency             String          @default("EUR")
+  status               PaymentStatus   @default(PENDING)
+  type                 String          @default("DEPOSIT")
+  description          String?
+  receiptUrl           String?
+  refundedAmount       Decimal         @default(0) @db.Decimal(10, 2)
+  stripeEventId        String?         @unique
+  idempotencyKey       String?         @unique
+  metadata             Json?
+  paidAt               DateTime?
+  failedAt             DateTime?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  booking      Booking      @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, status])
+  @@index([bookingId])
+}
+
+model PublicBookingConfig {
+  id             String   @id @default(uuid())
+  organizationId String   @unique
+  enabled        Boolean  @default(true)
+  slug           String   @unique
+  heroTitleEl    String?
+  heroTitleEn    String?
+  heroSubtitleEl String?  @db.Text
+  heroSubtitleEn String?  @db.Text
+  showExtras     Boolean  @default(true)
+  showDeposit    Boolean  @default(true)
+  requirePrepay  Boolean  @default(false)
+  termsUrl       String?
+  privacyUrl     String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model Device {
+  id             String            @id @default(uuid())
+  organizationId String
+  vehicleId      String            @unique
+  deviceId       String            @unique
+  type           DeviceType
+  provider       TelemetryProvider @default(GENERIC)
+  apiKeyHash     String            @unique
+  apiKeyLast4    String?
+  name           String?
+  lastSeenAt     DateTime?
+  isActive       Boolean           @default(true)
+  lastIp         String?
+  revokedAt      DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  vehicle      Vehicle             @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  telemetry    VehicleTelemetry[]
+
+  @@index([organizationId])
+  @@index([deviceId])
+}
+
+model VehiclePosition {
+  id             String                 @id @default(uuid())
+  organizationId String
+  vehicleId      String
+  point          Unsupported("geography(Point,4326)")
+  lat            Decimal                @db.Decimal(10, 7)
+  lng            Decimal                @db.Decimal(10, 7)
+  speed          Int?
+  heading        Int?
+  ignition       Boolean?
+  odometer       Int?
+  recordedAt     DateTime
+  receivedAt     DateTime               @default(now())
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId, recordedAt])
+  @@index([organizationId, recordedAt])
+}
+
+model VehicleTelemetry {
+  id             String    @id @default(uuid())
+  organizationId String
+  vehicleId      String
+  deviceId       String
+  lat            Decimal   @db.Decimal(10, 7)
+  lng            Decimal   @db.Decimal(10, 7)
+  speed          Int?
+  heading        Int?
+  ignition       Boolean?
+  odometer       Int?
+  fuelLevel      Int?
+  batteryVoltage Decimal?  @db.Decimal(4, 2)
+  dtcCodes       Json?
+  rawPayload     Json?
+  recordedAt     DateTime
+  receivedAt     DateTime  @default(now())
+  processedAt    DateTime?
+  enqueuedAt     DateTime?
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  device  Device  @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+
+  @@index([vehicleId, recordedAt])
+  @@index([deviceId, recordedAt])
+  @@index([organizationId, recordedAt])
+}
+
+model VehicleFault {
+  id               String        @id @default(uuid())
+  organizationId   String
+  vehicleId        String
+  dtcCode          String
+  description      String?       @db.Text
+  severity         FaultSeverity @default(MEDIUM)
+  status           FaultStatus   @default(OPEN)
+  firstSeenAt      DateTime      @default(now())
+  lastSeenAt       DateTime      @default(now())
+  acknowledgedAt   DateTime?
+  resolvedAt       DateTime?
+  acknowledgedById String?
+  notes            String?       @db.Text
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  vehicle         Vehicle          @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  maintenanceTask MaintenanceTask?
+
+  @@index([organizationId, status])
+  @@index([vehicleId, status])
+}
+
+model Geofence {
+  id             String                 @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+  polygon        Unsupported("geography(Polygon,4326)")
+  enabled        Boolean                @default(true)
+  alertOnEnter   Boolean                @default(false)
+  alertOnExit    Boolean                @default(true)
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+model MaintenanceTask {
+  id             String                @id @default(uuid())
+  organizationId String
+  vehicleId      String
+  faultId        String?               @unique
+  title          String
+  description    String?               @db.Text
+  status         MaintenanceTaskStatus @default(OPEN)
+  dueDate        DateTime?
+  dueOdometer    Int?
+  assignedTo     String?
+  completedAt    DateTime?
+  cost           Decimal?              @db.Decimal(10, 2)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  vehicle      Vehicle       @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  fault        VehicleFault? @relation(fields: [faultId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status])
+  @@index([vehicleId])
+}
+
+model AuditLog {
+  id             String      @id @default(uuid())
+  organizationId String?
+  actorId        String?
+  action         AuditAction
+  entityType     String
+  entityId       String?
+  ipAddress      String?
+  userAgent      String?
+  metadata       Json?
+  createdAt      DateTime    @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  actor        User?         @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+}
