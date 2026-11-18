@@ -12,6 +12,7 @@ const schema = z.object({
   depositAmount: z.coerce.number().min(0).default(300),
   seats: z.coerce.number().int().optional().nullable(),
   transmission: z.string().optional().nullable(),
+  imageUrl: z.string().url().optional().nullable().or(z.literal("")),
 });
 
 export async function GET() {
@@ -50,6 +51,7 @@ export async function POST(req: Request) {
         depositAmount: body.depositAmount,
         seats: body.seats || null,
         transmission: body.transmission || null,
+        imageUrl: body.imageUrl?.trim() || null,
         organizationId: session.organizationId,
       },
     });

@@ -113,6 +113,7 @@ export async function GET(req: Request) {
     model: v.model,
     year: v.year,
     branchName: v.branch?.name || null,
+    imageUrl: v.photos?.[0] || null,
   }));
 
   return withPublicCors(

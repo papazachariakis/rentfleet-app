@@ -160,6 +160,8 @@ model VehicleCategory {
   /** CAR | MOTO | SCOOTER | VAN */
   vehicleType    String       @default("CAR")
   description    String?
+  /** Public booking / marketing cover image (R2 URL) */
+  imageUrl       String?
   baseDailyRate  Float        @default(40)
   depositAmount  Float        @default(300)
   seats          Int?

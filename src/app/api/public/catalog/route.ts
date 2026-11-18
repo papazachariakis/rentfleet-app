@@ -42,6 +42,7 @@ export async function GET(req: Request) {
     depositAmount: c.depositAmount,
     seats: c.seats,
     transmission: c.transmission,
+    imageUrl: c.imageUrl || null,
   }));
 
   return withPublicCors(

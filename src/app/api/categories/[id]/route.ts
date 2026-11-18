@@ -18,6 +18,7 @@ const patchSchema = z.object({
   depositAmount: z.coerce.number().min(0).optional(),
   seats: z.coerce.number().int().optional().nullable(),
   transmission: z.string().optional().nullable(),
+  imageUrl: z.string().url().optional().nullable().or(z.literal("")),
   active: z.boolean().optional(),
 });
 
@@ -75,6 +76,9 @@ export async function PATCH(
         ...(body.seats !== undefined ? { seats: body.seats } : {}),
         ...(body.transmission !== undefined
           ? { transmission: body.transmission || null }
+          : {}),
+        ...(body.imageUrl !== undefined
+          ? { imageUrl: body.imageUrl?.trim() || null }
           : {}),
         ...(body.active !== undefined ? { active: body.active } : {}),
       },
