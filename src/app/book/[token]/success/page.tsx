@@ -56,7 +56,7 @@ export default async function BookSuccessPage({
           <p>
             <span className="text-muted">Όχημα:</span>{" "}
             {booking.vehicle
-              ? `${booking.vehicle.make} ${booking.vehicle.model} (${booking.vehicle.plateNumber})`
+              ? `${booking.vehicle.make} ${booking.vehicle.model}`
               : "—"}
           </p>
           <p>
