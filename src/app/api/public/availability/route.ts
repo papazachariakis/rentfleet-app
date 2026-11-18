@@ -4,6 +4,11 @@ import { findAvailableVehicles } from "@/lib/public-booking";
 import { loadOrgPriceRules, priceRental } from "@/lib/bookings";
 import { calcExtrasTotal } from "@/lib/pricing";
 import { rentalDays } from "@/lib/utils";
+import { publicOptions, withPublicCors } from "@/lib/public-cors";
+
+export async function OPTIONS(req: Request) {
+  return publicOptions(req);
+}
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -18,7 +23,10 @@ export async function GET(req: Request) {
     .filter(Boolean);
 
   if (!token || !categoryId || !pickupAtRaw || !returnAtRaw) {
-    return NextResponse.json({ error: "Λείπουν παράμετροι" }, { status: 400 });
+    return withPublicCors(
+      req,
+      NextResponse.json({ error: "Λείπουν παράμετροι" }, { status: 400 })
+    );
   }
 
   const org = await prisma.organization.findUnique({
@@ -26,21 +34,30 @@ export async function GET(req: Request) {
     select: { id: true, vatCategory: true },
   });
   if (!org) {
-    return NextResponse.json({ error: "Δεν βρέθηκε" }, { status: 404 });
+    return withPublicCors(
+      req,
+      NextResponse.json({ error: "Δεν βρέθηκε" }, { status: 404 })
+    );
   }
 
   const pickupAt = new Date(pickupAtRaw);
   const returnAt = new Date(returnAtRaw);
   if (Number.isNaN(pickupAt.getTime()) || Number.isNaN(returnAt.getTime())) {
-    return NextResponse.json({ error: "Μη έγκυρες ημερομηνίες" }, { status: 400 });
+    return withPublicCors(
+      req,
+      NextResponse.json({ error: "Μη έγκυρες ημερομηνίες" }, { status: 400 })
+    );
   }
   if (!(returnAt > pickupAt)) {
-    return NextResponse.json(
-      {
-        error:
-          "Η ημερομηνία και ώρα επιστροφής πρέπει να είναι μεταγενέστερη της παραλαβής",
-      },
-      { status: 400 }
+    return withPublicCors(
+      req,
+      NextResponse.json(
+        {
+          error:
+            "Η ημερομηνία και ώρα επιστροφής πρέπει να είναι μεταγενέστερη της παραλαβής",
+        },
+        { status: 400 }
+      )
     );
   }
 
@@ -48,7 +65,10 @@ export async function GET(req: Request) {
     where: { id: categoryId, organizationId: org.id, active: true },
   });
   if (!category) {
-    return NextResponse.json({ error: "Κατηγορία δεν βρέθηκε" }, { status: 404 });
+    return withPublicCors(
+      req,
+      NextResponse.json({ error: "Κατηγορία δεν βρέθηκε" }, { status: 404 })
+    );
   }
 
   const vehicles = await findAvailableVehicles({
@@ -95,12 +115,15 @@ export async function GET(req: Request) {
     branchName: v.branch?.name || null,
   }));
 
-  return NextResponse.json({
-    available: list.length > 0,
-    count: list.length,
-    vehicles: list,
-    /** συμβατότητα με παλιό UI */
-    vehicle: list[0] || null,
-    quote: priced,
-  });
+  return withPublicCors(
+    req,
+    NextResponse.json({
+      available: list.length > 0,
+      count: list.length,
+      vehicles: list,
+      /** συμβατότητα με παλιό UI */
+      vehicle: list[0] || null,
+      quote: priced,
+    })
+  );
 }

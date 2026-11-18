@@ -9,6 +9,11 @@ import {
   getOrgStripe,
   orgCanAcceptPayments,
 } from "@/lib/stripe";
+import {
+  isAllowedPublicOrigin,
+  publicOptions,
+  withPublicCors,
+} from "@/lib/public-cors";
 
 const schema = z.object({
   token: z.string().min(4),
@@ -31,7 +36,19 @@ const schema = z.object({
   notes: z.string().max(500).optional(),
   licenseFrontImage: z.string().max(8_000_000).optional().nullable(),
   licenseBackImage: z.string().max(8_000_000).optional().nullable(),
+  /** External marketing site base, e.g. https://reliable.drivemanager.gr */
+  returnBaseUrl: z.string().url().optional().nullable(),
 });
+
+export async function OPTIONS(req: Request) {
+  return publicOptions(req);
+}
+
+function resolveExternalBase(returnBaseUrl?: string | null) {
+  const cleaned = (returnBaseUrl || "").replace(/\/$/, "");
+  if (cleaned && isAllowedPublicOrigin(cleaned)) return cleaned;
+  return null;
+}
 
 export async function POST(req: Request) {
   try {
@@ -48,24 +65,30 @@ export async function POST(req: Request) {
       },
     });
     if (!org) {
-      return NextResponse.json({ error: "Δεν βρέθηκε" }, { status: 404 });
+      return withPublicCors(
+        req,
+        NextResponse.json({ error: "Δεν βρέθηκε" }, { status: 404 })
+      );
     }
 
     const pickupAt = new Date(body.pickupAt);
     const returnAt = new Date(body.returnAt);
     if (Number.isNaN(pickupAt.getTime()) || Number.isNaN(returnAt.getTime())) {
-      return NextResponse.json(
-        { error: "Μη έγκυρες ημερομηνίες" },
-        { status: 400 }
+      return withPublicCors(
+        req,
+        NextResponse.json({ error: "Μη έγκυρες ημερομηνίες" }, { status: 400 })
       );
     }
     if (!(returnAt > pickupAt)) {
-      return NextResponse.json(
-        {
-          error:
-            "Η ημερομηνία και ώρα επιστροφής πρέπει να είναι μεταγενέστερη της παραλαβής",
-        },
-        { status: 400 }
+      return withPublicCors(
+        req,
+        NextResponse.json(
+          {
+            error:
+              "Η ημερομηνία και ώρα επιστροφής πρέπει να είναι μεταγενέστερη της παραλαβής",
+          },
+          { status: 400 }
+        )
       );
     }
 
@@ -77,9 +100,9 @@ export async function POST(req: Request) {
       },
     });
     if (!category) {
-      return NextResponse.json(
-        { error: "Κατηγορία δεν βρέθηκε" },
-        { status: 404 }
+      return withPublicCors(
+        req,
+        NextResponse.json({ error: "Κατηγορία δεν βρέθηκε" }, { status: 404 })
       );
     }
 
@@ -112,41 +135,60 @@ export async function POST(req: Request) {
 
     if ("error" in created) {
       if (created.error === "LICENSE_INVALID") {
-        return NextResponse.json(
-          {
-            error:
-              "message" in created
-                ? created.message
-                : "Το δίπλωμα δεν επιτρέπει αυτή την κατηγορία οχήματος",
-          },
-          { status: 400 }
+        return withPublicCors(
+          req,
+          NextResponse.json(
+            {
+              error:
+                "message" in created
+                  ? created.message
+                  : "Το δίπλωμα δεν επιτρέπει αυτή την κατηγορία οχήματος",
+            },
+            { status: 400 }
+          )
         );
       }
-      return NextResponse.json(
-        {
-          error:
-            "Δεν υπάρχει διαθέσιμο όχημα σε αυτή την κατηγορία για τις ημερομηνίες.",
-        },
-        { status: 409 }
+      return withPublicCors(
+        req,
+        NextResponse.json(
+          {
+            error:
+              "Δεν υπάρχει διαθέσιμο όχημα σε αυτή την κατηγορία για τις ημερομηνίες.",
+          },
+          { status: 409 }
+        )
       );
     }
 
     const { booking, priced } = created;
     await ensureAgreement(booking.id);
+    const externalBase = resolveExternalBase(body.returnBaseUrl);
+    const origin = appOrigin(req);
+    const successPath = externalBase
+      ? `${externalBase}/book/success?booking=${booking.id}&code=${encodeURIComponent(booking.code || "")}`
+      : `${origin}/book/${body.token}/success?booking=${booking.id}`;
+    const cancelPath = externalBase
+      ? `${externalBase}/book?cancelled=1`
+      : `${origin}/book/${body.token}?cancelled=1`;
+
     if (!takePayment) {
       void sendBookingConfirmationEmail(booking.id);
-      return NextResponse.json({
-        ok: true,
-        paid: false,
-        bookingId: booking.id,
-        code: booking.code,
-        totalAmount: priced.totalAmount,
-        days: priced.days,
-        redirectTo: `/book/${body.token}/success?booking=${booking.id}`,
-      });
+      return withPublicCors(
+        req,
+        NextResponse.json({
+          ok: true,
+          paid: false,
+          bookingId: booking.id,
+          code: booking.code,
+          totalAmount: priced.totalAmount,
+          days: priced.days,
+          redirectTo: externalBase
+            ? `${successPath}`
+            : `/book/${body.token}/success?booking=${booking.id}`,
+        })
+      );
     }
 
-    const origin = appOrigin(req);
     const stripe = getOrgStripe(org.stripeSecretKey);
 
     try {
@@ -177,8 +219,10 @@ export async function POST(req: Request) {
           organizationId: org.id,
           publicToken: body.token,
         },
-        success_url: `${origin}/book/${body.token}/success?booking=${booking.id}&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${origin}/book/${body.token}?cancelled=1`,
+        success_url: externalBase
+          ? `${successPath}&session_id={CHECKOUT_SESSION_ID}`
+          : `${successPath}&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: cancelPath,
         expires_at: Math.floor(Date.now() / 1000) + 60 * 30,
       });
 
@@ -187,14 +231,17 @@ export async function POST(req: Request) {
         data: { stripeSessionId: session.id },
       });
 
-      return NextResponse.json({
-        ok: true,
-        paid: false,
-        checkoutUrl: session.url,
-        bookingId: booking.id,
-        code: booking.code,
-        totalAmount: priced.totalAmount,
-      });
+      return withPublicCors(
+        req,
+        NextResponse.json({
+          ok: true,
+          paid: false,
+          checkoutUrl: session.url,
+          bookingId: booking.id,
+          code: booking.code,
+          totalAmount: priced.totalAmount,
+        })
+      );
     } catch (err) {
       await prisma.booking.update({
         where: { id: booking.id },
@@ -206,19 +253,25 @@ export async function POST(req: Request) {
         },
       });
       console.error("stripe checkout error", err);
-      return NextResponse.json(
-        { error: "Αποτυχία Stripe checkout. Έλεγξε τα keys στο /payments." },
-        { status: 502 }
+      return withPublicCors(
+        req,
+        NextResponse.json(
+          { error: "Αποτυχία Stripe checkout. Έλεγξε τα keys στο /payments." },
+          { status: 502 }
+        )
       );
     }
   } catch (e) {
     if (e instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: "Μη έγκυρα στοιχεία φόρμας" },
-        { status: 400 }
+      return withPublicCors(
+        req,
+        NextResponse.json({ error: "Μη έγκυρα στοιχεία φόρμας" }, { status: 400 })
       );
     }
     console.error("public book error", e);
-    return NextResponse.json({ error: "Αποτυχία κράτησης" }, { status: 400 });
+    return withPublicCors(
+      req,
+      NextResponse.json({ error: "Αποτυχία κράτησης" }, { status: 400 })
+    );
   }
 }
