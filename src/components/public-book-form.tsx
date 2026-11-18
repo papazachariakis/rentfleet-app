@@ -76,7 +76,6 @@ export function PublicBookForm({
     quote?: { days: number; totalAmount: number; depositAmount: number };
     vehicles?: {
       id: string;
-      plateNumber: string;
       make: string;
       model: string;
       year: number | null;
@@ -350,10 +349,11 @@ export function PublicBookForm({
                           {v.make} {v.model}
                           {v.year ? ` (${v.year})` : ""}
                         </span>
-                        <span className="mt-0.5 block text-xs text-muted">
-                          {v.plateNumber}
-                          {v.branchName ? ` · ${v.branchName}` : ""}
-                        </span>
+                        {v.branchName ? (
+                          <span className="mt-0.5 block text-xs text-muted">
+                            {v.branchName}
+                          </span>
+                        ) : null}
                       </span>
                     </span>
                   </label>

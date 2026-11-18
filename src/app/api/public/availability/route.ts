@@ -106,9 +106,9 @@ export async function GET(req: Request) {
     extrasTotal,
   });
 
+  // Public clients must not see plate numbers — only desk/admin does.
   const list = vehicles.map((v) => ({
     id: v.id,
-    plateNumber: v.plateNumber,
     make: v.make,
     model: v.model,
     year: v.year,

@@ -203,7 +203,7 @@ export async function POST(req: Request) {
               unit_amount: Math.round(priced.totalAmount * 100),
               product_data: {
                 name: `${category.name} · ${priced.days} ημέρες`,
-                description: `${booking.vehicle?.plateNumber || category.name} · ${pickupAt.toISOString().slice(0, 10)} → ${returnAt.toISOString().slice(0, 10)}`,
+                description: `${booking.vehicle ? `${booking.vehicle.make} ${booking.vehicle.model}` : category.name} · ${pickupAt.toISOString().slice(0, 10)} → ${returnAt.toISOString().slice(0, 10)}`,
               },
             },
           },
