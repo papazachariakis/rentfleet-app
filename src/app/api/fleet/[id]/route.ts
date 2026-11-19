@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { BLOCKING_STATUSES } from "@/lib/bookings";
+import { isR2Configured, r2DeleteByPublicUrl } from "@/lib/r2";
 
 const schema = z.object({
   plateNumber: z.string().min(2).max(20).optional(),
@@ -154,6 +155,8 @@ export async function DELETE(
     );
   }
 
+  const photoUrls = [...(existing.photos || [])];
+
   await prisma.$transaction(async (tx) => {
     await tx.booking.updateMany({
       where: { vehicleId: id },
@@ -162,6 +165,10 @@ export async function DELETE(
     await tx.telematicsDevice.deleteMany({ where: { vehicleId: id } });
     await tx.vehicle.delete({ where: { id } });
   });
+
+  if (isR2Configured()) {
+    await Promise.all(photoUrls.map((url) => r2DeleteByPublicUrl(url)));
+  }
 
   return NextResponse.json({ ok: true, deleted: true });
 }

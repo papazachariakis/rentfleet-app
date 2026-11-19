@@ -51,6 +51,7 @@ type Vehicle = {
   odometerKm: number;
   fuelType: string | null;
   notes: string | null;
+  photos?: string[];
   categoryId: string | null;
   branchId: string | null;
   insuranceExpiry: string | Date | null;
@@ -181,6 +182,7 @@ export function FleetManager({
   const [catalogType, setCatalogType] = useState<string>("ALL");
   const [sortKey, setSortKey] = useState<VehicleSortKey>("category");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [photoBusy, setPhotoBusy] = useState(false);
 
   function toggleSort(key: VehicleSortKey) {
     if (sortKey === key) {
@@ -274,6 +276,49 @@ export function FleetManager({
     const list = await fetch("/api/fleet").then((r) => r.json());
     setVehicles(list.vehicles || []);
     router.refresh();
+  }
+
+  const editingVehicle = editingId
+    ? vehicles.find((v) => v.id === editingId) || null
+    : null;
+
+  async function uploadPhotos(files: FileList | null) {
+    if (!editingId || !files?.length) return;
+    setPhotoBusy(true);
+    setMsg("");
+    const fd = new FormData();
+    Array.from(files).forEach((f) => fd.append("files", f));
+    const res = await fetch(`/api/fleet/${editingId}/photos`, {
+      method: "POST",
+      body: fd,
+    });
+    const data = await res.json().catch(() => ({}));
+    setPhotoBusy(false);
+    if (!res.ok) {
+      setMsg(data.error || "Αποτυχία ανεβάσματος");
+      return;
+    }
+    setMsg(`Ανέβηκαν ${data.photos?.length || ""} φωτογραφίες στο R2`);
+    await refreshVehicles();
+  }
+
+  async function removePhoto(url: string) {
+    if (!editingId) return;
+    if (!confirm("Διαγραφή φωτογραφίας;")) return;
+    setPhotoBusy(true);
+    const res = await fetch(`/api/fleet/${editingId}/photos`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setPhotoBusy(false);
+    if (!res.ok) {
+      setMsg(data.error || "Αποτυχία διαγραφής");
+      return;
+    }
+    setMsg("Η φωτογραφία διαγράφηκε");
+    await refreshVehicles();
   }
 
   function startEdit(v: Vehicle) {
@@ -634,6 +679,61 @@ export function FleetManager({
               />
             </div>
             <div className="sm:col-span-2">
+              <Label>Φωτογραφίες (Cloudflare R2)</Label>
+              {editingId ? (
+                <div className="mt-1 space-y-2">
+                  <div className="flex flex-wrap gap-2">
+                    {(editingVehicle?.photos || []).map((src) => (
+                      <div
+                        key={src}
+                        className="group relative h-20 w-28 overflow-hidden rounded-lg border border-border bg-slate-50"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={src}
+                          alt=""
+                          className="h-full w-full object-cover"
+                        />
+                        <button
+                          type="button"
+                          disabled={photoBusy}
+                          onClick={() => removePhoto(src)}
+                          className="absolute inset-x-0 bottom-0 bg-black/60 py-0.5 text-[10px] text-white opacity-0 transition group-hover:opacity-100"
+                        >
+                          Διαγραφή
+                        </button>
+                      </div>
+                    ))}
+                    {(editingVehicle?.photos?.length || 0) === 0 ? (
+                      <p className="text-xs text-muted">
+                        Καμία φωτογραφία ακόμα
+                      </p>
+                    ) : null}
+                  </div>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    multiple
+                    disabled={photoBusy || loading}
+                    onChange={(e) => {
+                      void uploadPhotos(e.target.files);
+                      e.target.value = "";
+                    }}
+                    className="block w-full text-sm text-muted file:mr-3 file:rounded-lg file:border-0 file:bg-accent file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-accent-dark"
+                  />
+                  <p className="text-[11px] text-muted">
+                    Έως 8 φωτογραφίες · JPEG/PNG/WebP · max 5MB · αποθήκευση στο
+                    R2
+                  </p>
+                </div>
+              ) : (
+                <p className="mt-1 text-xs text-muted">
+                  Αποθήκευσε πρώτα το όχημα, μετά άνοιξε «Διόρθωση» για
+                  φωτογραφίες.
+                </p>
+              )}
+            </div>
+            <div className="sm:col-span-2">
               <Label>Σημειώσεις</Label>
               <Input
                 value={form.notes}
@@ -809,6 +909,7 @@ export function FleetManager({
         <table className="w-full min-w-[720px] text-left text-sm">
           <thead className="border-b border-border bg-slate-50 text-xs uppercase text-muted">
             <tr>
+              <th className="px-4 py-3">Φωτό</th>
               {VEHICLE_SORT_COLS.map((col) => {
                 const active = sortKey === col.key;
                 return (
@@ -837,7 +938,7 @@ export function FleetManager({
             {catalogVehicles.length === 0 ? (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="px-4 py-6 text-center text-muted"
                 >
                   Δεν υπάρχουν οχήματα σε αυτόν τον κατάλογο
@@ -855,10 +956,29 @@ export function FleetManager({
                         : undefined
                   }
                 >
+                  <td className="px-4 py-2">
+                    {v.photos?.[0] ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={v.photos[0]}
+                        alt={v.plateNumber}
+                        className="h-12 w-16 rounded-md border border-border object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-12 w-16 items-center justify-center rounded-md border border-dashed border-border bg-slate-50 text-[10px] text-muted">
+                        —
+                      </div>
+                    )}
+                  </td>
                   <td className="px-4 py-3 font-medium">{v.plateNumber}</td>
                   <td className="px-4 py-3">
                     {v.make} {v.model}
                     {v.year ? ` (${v.year})` : ""}
+                    {v.photos && v.photos.length > 1 ? (
+                      <span className="ml-1 text-[11px] text-muted">
+                        · {v.photos.length} φωτό
+                      </span>
+                    ) : null}
                   </td>
                   <td className="px-4 py-3">
                     {vehicleTypeLabel(v.vehicleType)}
