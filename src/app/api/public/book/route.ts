@@ -14,6 +14,7 @@ import {
   publicOptions,
   withPublicCors,
 } from "@/lib/public-cors";
+import { loadPartnerByPublicToken } from "@/lib/partners";
 
 const schema = z.object({
   token: z.string().min(4),
@@ -38,6 +39,8 @@ const schema = z.object({
   licenseBackImage: z.string().max(8_000_000).optional().nullable(),
   /** External marketing site base, e.g. https://reliable.drivemanager.gr */
   returnBaseUrl: z.string().url().optional().nullable(),
+  /** Ιδιωτικό token συμφωνίας broker/ξενοδοχείου */
+  partnerToken: z.string().optional().nullable(),
 });
 
 export async function OPTIONS(req: Request) {
@@ -106,6 +109,19 @@ export async function POST(req: Request) {
       );
     }
 
+    const partner = body.partnerToken
+      ? await loadPartnerByPublicToken(body.partnerToken)
+      : null;
+    if (
+      body.partnerToken &&
+      (!partner || partner.organizationId !== org.id)
+    ) {
+      return withPublicCors(
+        req,
+        NextResponse.json({ error: "Μη έγκυρη συμφωνία partner" }, { status: 400 })
+      );
+    }
+
     const takePayment = orgCanAcceptPayments(org);
     const created = await createOnlineBookingDraft({
       org,
@@ -119,6 +135,8 @@ export async function POST(req: Request) {
       extraIds: body.extraIds,
       notes: body.notes,
       pendingPayment: takePayment,
+      partnerAgreementId: partner?.id || null,
+      partnerAgreement: partner || null,
       customer: {
         firstName: body.firstName.trim(),
         lastName: body.lastName.trim(),
@@ -164,12 +182,19 @@ export async function POST(req: Request) {
     await ensureAgreement(booking.id);
     const externalBase = resolveExternalBase(body.returnBaseUrl);
     const origin = appOrigin(req);
+    const partnerTok = partner?.publicToken || body.partnerToken || null;
+    const localSuccess = partnerTok
+      ? `/book/partner/${partnerTok}/success?booking=${booking.id}`
+      : `/book/${body.token}/success?booking=${booking.id}`;
+    const localCancel = partnerTok
+      ? `/book/partner/${partnerTok}?cancelled=1`
+      : `/book/${body.token}?cancelled=1`;
     const successPath = externalBase
       ? `${externalBase}/book/success?booking=${booking.id}&code=${encodeURIComponent(booking.code || "")}`
-      : `${origin}/book/${body.token}/success?booking=${booking.id}`;
+      : `${origin}${localSuccess}`;
     const cancelPath = externalBase
       ? `${externalBase}/book?cancelled=1`
-      : `${origin}/book/${body.token}?cancelled=1`;
+      : `${origin}${localCancel}`;
 
     if (!takePayment) {
       void sendBookingConfirmationEmail(booking.id);
@@ -182,9 +207,7 @@ export async function POST(req: Request) {
           code: booking.code,
           totalAmount: priced.totalAmount,
           days: priced.days,
-          redirectTo: externalBase
-            ? `${successPath}`
-            : `/book/${body.token}/success?booking=${booking.id}`,
+          redirectTo: externalBase ? `${successPath}` : localSuccess,
         })
       );
     }

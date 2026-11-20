@@ -4,7 +4,9 @@ import { rentalDays } from "@/lib/utils";
 export function resolveVehicleRates(vehicle: {
   dailyRate?: number | null;
   depositAmount?: number | null;
+  categoryId?: string | null;
   category?: {
+    id?: string | null;
     baseDailyRate?: number | null;
     depositAmount?: number | null;
   } | null;
@@ -14,6 +16,63 @@ export function resolveVehicleRates(vehicle: {
     depositAmount:
       vehicle.depositAmount ?? vehicle.category?.depositAmount ?? 300,
   };
+}
+
+export type PartnerRateLike = {
+  categoryId: string;
+  dailyRate: number;
+  depositAmount?: number | null;
+};
+
+export type PartnerAgreementLike = {
+  discountPercent?: number | null;
+  rates?: PartnerRateLike[];
+};
+
+/**
+ * Τιμές με συμφωνία broker/ξενοδοχείου:
+ * 1) PartnerRate για την κατηγορία
+ * 2) αλλιώς λιανικό × (1 − discount%/100)
+ * 3) αλλιώς λιανικό
+ */
+export function resolvePartnerRates(
+  vehicle: {
+    dailyRate?: number | null;
+    depositAmount?: number | null;
+    categoryId?: string | null;
+    category?: {
+      id?: string | null;
+      baseDailyRate?: number | null;
+      depositAmount?: number | null;
+    } | null;
+  },
+  agreement?: PartnerAgreementLike | null
+) {
+  const retail = resolveVehicleRates(vehicle);
+  if (!agreement) return retail;
+
+  const categoryId = vehicle.categoryId || vehicle.category?.id || null;
+  const rate = categoryId
+    ? agreement.rates?.find((r) => r.categoryId === categoryId)
+    : undefined;
+
+  if (rate) {
+    return {
+      dailyRate: rate.dailyRate,
+      depositAmount: rate.depositAmount ?? retail.depositAmount,
+    };
+  }
+
+  const discount = agreement.discountPercent;
+  if (discount != null && discount > 0) {
+    const factor = Math.max(0, 1 - discount / 100);
+    return {
+      dailyRate: Math.round(retail.dailyRate * factor * 100) / 100,
+      depositAmount: retail.depositAmount,
+    };
+  }
+
+  return retail;
 }
 
 export type PriceRuleLike = {

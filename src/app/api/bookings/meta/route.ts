@@ -29,7 +29,8 @@ export async function GET(req: Request) {
     !Number.isNaN(returnAt.getTime()) &&
     pickupAt < returnAt;
 
-  const [vehicles, customers, branches, extras, categories, busyBookings] =
+  const now = new Date();
+  const [vehicles, customers, branches, extras, categories, partners, busyBookings] =
     await Promise.all([
       prisma.vehicle.findMany({
         where: { organizationId: orgId, active: true },
@@ -51,6 +52,18 @@ export async function GET(req: Request) {
       }),
       prisma.vehicleCategory.findMany({
         where: { organizationId: orgId, active: true },
+      }),
+      prisma.partnerAgreement.findMany({
+        where: {
+          organizationId: orgId,
+          active: true,
+          AND: [
+            { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
+            { OR: [{ validTo: null }, { validTo: { gte: now } }] },
+          ],
+        },
+        include: { rates: true },
+        orderBy: { name: "asc" },
       }),
       hasRange
         ? prisma.booking.findMany({
@@ -95,5 +108,6 @@ export async function GET(req: Request) {
     branches,
     extras,
     categories: sortByCategoryName(categories),
+    partners,
   });
 }

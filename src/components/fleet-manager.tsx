@@ -50,6 +50,12 @@ type Vehicle = {
   active: boolean;
   odometerKm: number;
   fuelType: string | null;
+  seats?: number | null;
+  bags?: number | null;
+  doors?: number | null;
+  transmission?: string | null;
+  airConditioning?: boolean;
+  hasGps?: boolean;
   notes: string | null;
   photos?: string[];
   categoryId: string | null;
@@ -73,6 +79,12 @@ type FormState = {
   branchId: string;
   odometerKm: string;
   fuelType: string;
+  seats: string;
+  bags: string;
+  doors: string;
+  transmission: string;
+  airConditioning: boolean;
+  hasGps: boolean;
   insuranceExpiry: string;
   kteoExpiry: string;
   mechanicalExpiry: string;
@@ -92,6 +104,12 @@ const empty: FormState = {
   branchId: "",
   odometerKm: "0",
   fuelType: "",
+  seats: "5",
+  bags: "2",
+  doors: "4",
+  transmission: "Manual",
+  airConditioning: true,
+  hasGps: true,
   insuranceExpiry: "",
   kteoExpiry: "",
   mechanicalExpiry: "",
@@ -119,6 +137,12 @@ function vehicleToForm(v: Vehicle): FormState {
     branchId: v.branchId || "",
     odometerKm: String(v.odometerKm ?? 0),
     fuelType: v.fuelType || "",
+    seats: String(v.seats ?? 5),
+    bags: String(v.bags ?? 2),
+    doors: String(v.doors ?? 4),
+    transmission: v.transmission || "Manual",
+    airConditioning: v.airConditioning ?? true,
+    hasGps: v.hasGps ?? true,
     insuranceExpiry: toDateInput(v.insuranceExpiry),
     kteoExpiry: toDateInput(v.kteoExpiry),
     mechanicalExpiry: toDateInput(v.mechanicalExpiry),
@@ -137,7 +161,13 @@ function formPayload(form: FormState) {
     vehicleType: form.vehicleType,
     status: form.status,
     odometerKm: Number(form.odometerKm) || 0,
-    fuelType: form.fuelType || null,
+    fuelType: form.fuelType.trim(),
+    seats: Number(form.seats),
+    bags: Number(form.bags),
+    doors: Number(form.doors),
+    transmission: form.transmission,
+    airConditioning: form.airConditioning,
+    hasGps: form.hasGps,
     categoryId: form.categoryId || null,
     branchId: form.branchId || null,
     insuranceExpiry: form.insuranceExpiry || null,
@@ -338,6 +368,19 @@ export function FleetManager({
     e.preventDefault();
     setLoading(true);
     setMsg("");
+    if (
+      !form.fuelType.trim() ||
+      !form.seats.trim() ||
+      !form.bags.trim() ||
+      !form.doors.trim() ||
+      !form.transmission.trim()
+    ) {
+      setLoading(false);
+      setMsg(
+        "Συμπληρώστε υποχρεωτικά: τύπο καυσίμου, θέσεις, βαλίτσες, πόρτες και κιβώτιο."
+      );
+      return;
+    }
     const payload = formPayload(form);
     const res = await fetch(
       editingId ? `/api/fleet/${editingId}` : "/api/fleet",
@@ -586,14 +629,102 @@ export function FleetManager({
               />
             </div>
             <div>
-              <Label>Καύσιμο</Label>
-              <Input
+              <Label>Τύπος καυσίμου *</Label>
+              <select
+                required
+                className="w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm"
                 value={form.fuelType}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, fuelType: e.target.value }))
                 }
-                placeholder="Βενζίνη / Diesel / Ηλεκτρικό"
+              >
+                <option value="">— επιλέξτε —</option>
+                <option value="Petrol">Βενζίνη</option>
+                <option value="Diesel">Diesel</option>
+                <option value="Hybrid">Hybrid</option>
+                <option value="Electric">Ηλεκτρικό</option>
+                <option value="Diesel or Petrol">Diesel ή Βενζίνη</option>
+              </select>
+            </div>
+            <div>
+              <Label>Θέσεις *</Label>
+              <Input
+                required
+                type="number"
+                min={1}
+                max={20}
+                value={form.seats}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, seats: e.target.value }))
+                }
               />
+            </div>
+            <div>
+              <Label>Βαλίτσες *</Label>
+              <Input
+                required
+                type="number"
+                min={0}
+                max={20}
+                value={form.bags}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, bags: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <Label>Πόρτες *</Label>
+              <Input
+                required
+                type="number"
+                min={0}
+                max={10}
+                value={form.doors}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, doors: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <Label>Κιβώτιο *</Label>
+              <select
+                required
+                className="w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm"
+                value={form.transmission}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, transmission: e.target.value }))
+                }
+              >
+                <option value="Manual">Manual</option>
+                <option value="Automatic">Αυτόματο</option>
+              </select>
+            </div>
+            <div className="flex flex-col justify-end gap-2 sm:col-span-2 sm:flex-row sm:items-center">
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-border"
+                  checked={form.airConditioning}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      airConditioning: e.target.checked,
+                    }))
+                  }
+                />
+                Κλιματισμός (A/C)
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-border"
+                  checked={form.hasGps}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, hasGps: e.target.checked }))
+                  }
+                />
+                GPS
+              </label>
             </div>
             <div>
               <Label>Κατάσταση</Label>

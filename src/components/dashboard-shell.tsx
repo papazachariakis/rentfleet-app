@@ -22,6 +22,8 @@ import {
   Radio,
   MapPinned,
   Cpu,
+  Handshake,
+  Megaphone,
   LogOut,
   Menu,
   X,
@@ -62,6 +64,7 @@ const navGroups: NavGroup[] = [
     label: "Πελάτες & δίκτυο",
     items: [
       { href: "/customers", label: "Πελάτες", icon: Users },
+      { href: "/partners", label: "Συμφωνίες", icon: Handshake },
       { href: "/branches", label: "Καταστήματα", icon: MapPin },
       { href: "/channels", label: "Κανάλια / OTA", icon: Radio },
     ],
@@ -70,6 +73,7 @@ const navGroups: NavGroup[] = [
     label: "Οικονομικά",
     items: [
       { href: "/pricing", label: "Τιμολόγηση", icon: TrendingUp },
+      { href: "/deals", label: "Προσφορές", icon: Megaphone },
       { href: "/payments", label: "Πληρωμές", icon: CreditCard },
       { href: "/tax", label: "ΑΑΔΕ & myDATA", icon: FileText },
       { href: "/reports", label: "Αναφορές", icon: BarChart3 },

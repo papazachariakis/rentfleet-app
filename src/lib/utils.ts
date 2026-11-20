@@ -92,6 +92,17 @@ export function vehicleTypeLabel(type: string) {
   return map[type] || type;
 }
 
+export function partnerKindLabel(kind: string) {
+  switch (kind) {
+    case "HOTEL":
+      return "Ξενοδοχείο";
+    case "OTHER":
+      return "Άλλο";
+    default:
+      return "Broker";
+  }
+}
+
 /**
  * Ταξινόμηση κατηγοριών τύπου CAT A, CAT.B, CAT. D1… (όχι απλό αλφαβητικό string).
  * Παράδειγμα σειράς: CAT.A → CAT.B → CAT.C → CAT.D → CAT.D+ → CAT.D1 → CAT.E → …

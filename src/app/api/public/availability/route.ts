@@ -2,8 +2,15 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { findAvailableVehicles } from "@/lib/public-booking";
 import { loadOrgPriceRules, priceRental } from "@/lib/bookings";
-import { calcExtrasTotal } from "@/lib/pricing";
+import { calcExtrasTotal, resolvePartnerRates } from "@/lib/pricing";
+import {
+  dealPriceLabel,
+  finalizeDealDiscount,
+  loadOrgDeals,
+  resolveDealPricing,
+} from "@/lib/deals";
 import { rentalDays } from "@/lib/utils";
+import { loadPartnerByPublicToken } from "@/lib/partners";
 import { publicOptions, withPublicCors } from "@/lib/public-cors";
 
 export async function OPTIONS(req: Request) {
@@ -13,6 +20,7 @@ export async function OPTIONS(req: Request) {
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const token = url.searchParams.get("token") || "";
+  const partnerToken = url.searchParams.get("partnerToken") || "";
   const categoryId = url.searchParams.get("categoryId") || "";
   const pickupAtRaw = url.searchParams.get("pickupAt") || "";
   const returnAtRaw = url.searchParams.get("returnAt") || "";
@@ -37,6 +45,16 @@ export async function GET(req: Request) {
     return withPublicCors(
       req,
       NextResponse.json({ error: "Δεν βρέθηκε" }, { status: 404 })
+    );
+  }
+
+  const partner = partnerToken
+    ? await loadPartnerByPublicToken(partnerToken)
+    : null;
+  if (partnerToken && (!partner || partner.organizationId !== org.id)) {
+    return withPublicCors(
+      req,
+      NextResponse.json({ error: "Μη έγκυρη συμφωνία partner" }, { status: 400 })
     );
   }
 
@@ -95,16 +113,63 @@ export async function GET(req: Request) {
     daysPreview
   );
 
-  const priced = priceRental({
-    dailyRate: category.baseDailyRate,
+  const partnerRates = partner
+    ? resolvePartnerRates(
+        {
+          categoryId: category.id,
+          category: {
+            id: category.id,
+            baseDailyRate: category.baseDailyRate,
+            depositAmount: category.depositAmount,
+          },
+        },
+        partner
+      )
+    : {
+        dailyRate: category.baseDailyRate,
+        depositAmount: category.depositAmount,
+      };
+
+  const deals = partner ? [] : await loadOrgDeals(org.id);
+  const dealPricing = resolveDealPricing({
+    retailDaily: partnerRates.dailyRate,
+    depositAmount: partnerRates.depositAmount,
+    categoryId,
+    deals,
+    days: daysPreview,
+    at: pickupAt,
+    skipDeals: Boolean(partner),
+  });
+
+  const pricedBase = priceRental({
+    dailyRate: dealPricing.dailyRate,
     pickupAt,
     returnAt,
-    depositAmount: category.depositAmount,
+    depositAmount: dealPricing.depositAmount,
     vatCategory: org.vatCategory,
     rules,
     categoryId,
     extrasTotal,
   });
+  const { discountAmount, freeDays } = finalizeDealDiscount({
+    averageDaily: pricedBase.averageDaily || dealPricing.dailyRate,
+    days: pricedBase.days,
+    deal: dealPricing.deal,
+  });
+  const priced =
+    discountAmount > 0
+      ? priceRental({
+          dailyRate: dealPricing.dailyRate,
+          pickupAt,
+          returnAt,
+          depositAmount: dealPricing.depositAmount,
+          vatCategory: org.vatCategory,
+          rules,
+          categoryId,
+          extrasTotal,
+          discountAmount,
+        })
+      : pricedBase;
 
   // Public clients must not see plate numbers — only desk/admin does.
   const list = vehicles.map((v) => ({
@@ -124,7 +189,22 @@ export async function GET(req: Request) {
       vehicles: list,
       /** συμβατότητα με παλιό UI */
       vehicle: list[0] || null,
-      quote: priced,
+      quote: {
+        ...priced,
+        discountAmount,
+        retailDailyRate: partnerRates.dailyRate,
+        dealDailyRate: dealPricing.dailyRate,
+        deal: dealPricing.deal
+          ? {
+              id: dealPricing.deal.id,
+              title: dealPricing.deal.title,
+              badge: dealPricing.deal.badge || "Προσφορά",
+              priceLabel: dealPriceLabel(dealPricing.deal),
+              freeDays,
+              discountType: dealPricing.deal.discountType,
+            }
+          : null,
+      },
     })
   );
 }

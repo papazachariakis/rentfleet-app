@@ -30,6 +30,8 @@ export const config = {
     "/admin/:path*",
     "/branding/:path*",
     "/channels/:path*",
+    "/partners/:path*",
+    "/deals/:path*",
     "/map/:path*",
     "/telematics/:path*",
   ],

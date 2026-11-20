@@ -75,6 +75,86 @@ model Organization {
   maintenanceLogs        MaintenanceLog[]
   channels               ChannelConnection[]
   telematicsDevices      TelematicsDevice[]
+  partnerAgreements      PartnerAgreement[]
+  deals                  Deal[]
+}
+
+/** Δημόσια προσφορά / deal στη σελίδα κράτησης της επιχείρησης */
+model Deal {
+  id             String           @id @default(cuid())
+  /** Ετικέτα π.χ. Προσφορά */
+  badge          String           @default("Προσφορά")
+  title          String
+  body           String?
+  cta            String           @default("Κλείσε τώρα")
+  /** Κείμενο τιμής στη μπάρα, π.χ. 5+1 δωρεάν */
+  priceLabel     String?
+  /**
+   * OVERRIDE_DAILY = σταθερή ημερήσια
+   * PERCENT = % έκπτωση στο λιανικό
+   * FREE_DAYS = π.χ. 5+1 δωρεάν (paidDays + dealValue δωρεάν)
+   */
+  discountType   String           @default("FREE_DAYS")
+  /** Ημερήσια τιμή, ποσοστό, ή αριθμός δωρεάν ημερών */
+  dealValue      Float            @default(1)
+  /** Για FREE_DAYS: πληρωτέες ημέρες στο πακέτο (το «5» στο 5+1) */
+  paidDays       Int?
+  active         Boolean          @default(true)
+  validFrom      DateTime?
+  validTo        DateTime?
+  /** Ελάχιστες ημέρες (αν κενό στο FREE_DAYS → paidDays + freeDays) */
+  minDays        Int?
+  imageUrl       String?
+  sortOrder      Int              @default(0)
+  categoryId     String?
+  category       VehicleCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime         @default(now())
+
+  @@index([organizationId, active])
+  @@index([categoryId])
+}
+
+/** Συμφωνία με broker / ξενοδοχείο — ξεχωριστός τιμοκατάλογος */
+model PartnerAgreement {
+  id               String        @id @default(cuid())
+  name             String
+  /** BROKER | HOTEL | OTHER */
+  kind             String        @default("BROKER")
+  contactName      String?
+  phone            String?
+  email            String?
+  notes            String?
+  /** Ιδιωτικό link: /book/partner/[publicToken] */
+  publicToken      String        @unique
+  active           Boolean       @default(true)
+  validFrom        DateTime?
+  validTo          DateTime?
+  /** Προαιρετικό % έκπτωση πάνω στον λιανικό αν λείπει PartnerRate */
+  discountPercent  Float?
+  organizationId   String
+  organization     Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  rates            PartnerRate[]
+  bookings         Booking[]
+  createdAt        DateTime      @default(now())
+
+  @@index([organizationId, active])
+}
+
+/** Ημερήσια τιμή συμφωνίας ανά κατηγορία οχήματος */
+model PartnerRate {
+  id             String           @id @default(cuid())
+  agreementId    String
+  agreement      PartnerAgreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  categoryId     String
+  category       VehicleCategory  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  dailyRate      Float
+  depositAmount  Float?
+  createdAt      DateTime         @default(now())
+
+  @@unique([agreementId, categoryId])
+  @@index([categoryId])
 }
 
 /** OTA / channel sync (Booking, iCal, custom) */
@@ -165,12 +245,19 @@ model VehicleCategory {
   baseDailyRate  Float        @default(40)
   depositAmount  Float        @default(300)
   seats          Int?
+  bags           Int?
+  doors          Int?
+  /** Manual | Automatic */
   transmission   String?
+  airConditioning Boolean     @default(true)
+  hasGps         Boolean      @default(false)
   active         Boolean      @default(true)
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   vehicles       Vehicle[]
   priceRules     PriceRule[]
+  partnerRates   PartnerRate[]
+  deals          Deal[]
   createdAt      DateTime     @default(now())
 
   @@unique([organizationId, name])
@@ -192,6 +279,13 @@ model Vehicle {
   odometerKm       Int              @default(0)
   fuelType         String?
   fuelLevel        String?
+  seats            Int?
+  bags             Int?
+  doors            Int?
+  /** Manual | Automatic */
+  transmission     String?
+  airConditioning  Boolean          @default(true)
+  hasGps           Boolean          @default(false)
   insuranceExpiry  DateTime?
   kteoExpiry       DateTime?
   /** Ετήσιος μηχανολογικός έλεγχος ενοικιαζομένων */
@@ -403,6 +497,8 @@ model Booking {
   returnBranch         Branch?   @relation("ReturnBranch", fields: [returnBranchId], references: [id])
   organizationId       String
   organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  partnerAgreementId   String?
+  partnerAgreement     PartnerAgreement? @relation(fields: [partnerAgreementId], references: [id])
   extras               BookingExtra[]
   inspections          Inspection[]
   agreement            RentalAgreement?
@@ -412,6 +508,7 @@ model Booking {
   @@index([organizationId, pickupAt, returnAt])
   @@index([organizationId, status])
   @@index([vehicleId, pickupAt, returnAt])
+  @@index([partnerAgreementId])
 }
 
 model BookingExtra {

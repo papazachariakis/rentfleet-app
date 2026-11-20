@@ -17,7 +17,11 @@ const patchSchema = z.object({
   baseDailyRate: z.coerce.number().positive().optional(),
   depositAmount: z.coerce.number().min(0).optional(),
   seats: z.coerce.number().int().optional().nullable(),
+  bags: z.coerce.number().int().optional().nullable(),
+  doors: z.coerce.number().int().optional().nullable(),
   transmission: z.string().optional().nullable(),
+  airConditioning: z.boolean().optional(),
+  hasGps: z.boolean().optional(),
   imageUrl: z.string().url().optional().nullable().or(z.literal("")),
   active: z.boolean().optional(),
 });
@@ -74,9 +78,15 @@ export async function PATCH(
           ? { depositAmount: body.depositAmount }
           : {}),
         ...(body.seats !== undefined ? { seats: body.seats } : {}),
+        ...(body.bags !== undefined ? { bags: body.bags } : {}),
+        ...(body.doors !== undefined ? { doors: body.doors } : {}),
         ...(body.transmission !== undefined
           ? { transmission: body.transmission || null }
           : {}),
+        ...(body.airConditioning !== undefined
+          ? { airConditioning: body.airConditioning }
+          : {}),
+        ...(body.hasGps !== undefined ? { hasGps: body.hasGps } : {}),
         ...(body.imageUrl !== undefined
           ? { imageUrl: body.imageUrl?.trim() || null }
           : {}),

@@ -5,7 +5,18 @@ import {
   makeBookingCode,
   loadOrgPriceRules,
 } from "@/lib/bookings";
-import { calcExtrasTotal, resolveVehicleRates } from "@/lib/pricing";
+import {
+  calcExtrasTotal,
+  resolvePartnerRates,
+  resolveVehicleRates,
+  type PartnerAgreementLike,
+} from "@/lib/pricing";
+import {
+  dealPriceLabel,
+  finalizeDealDiscount,
+  loadOrgDeals,
+  resolveDealPricing,
+} from "@/lib/deals";
 import { checkLicenseForVehicleType } from "@/lib/license-categories";
 import { rentalDays } from "@/lib/utils";
 
@@ -107,6 +118,8 @@ export async function createOnlineBookingDraft(input: {
   pendingPayment: boolean;
   licenseFrontImage?: string | null;
   licenseBackImage?: string | null;
+  partnerAgreementId?: string | null;
+  partnerAgreement?: PartnerAgreementLike | null;
 }) {
   const vehicle = await findAvailableVehicle({
     organizationId: input.org.id,
@@ -134,8 +147,23 @@ export async function createOnlineBookingDraft(input: {
     }
   }
 
-  const { dailyRate, depositAmount } = resolveVehicleRates(vehicle);
+  const retail = input.partnerAgreement
+    ? resolvePartnerRates(vehicle, input.partnerAgreement)
+    : resolveVehicleRates(vehicle);
   const rules = await loadOrgPriceRules(input.org.id, input.categoryId);
+  const daysPreview = rentalDays(input.pickupAt, input.returnAt);
+  const deals = input.partnerAgreement
+    ? []
+    : await loadOrgDeals(input.org.id);
+  const dealPricing = resolveDealPricing({
+    retailDaily: retail.dailyRate,
+    depositAmount: retail.depositAmount,
+    categoryId: input.categoryId,
+    deals,
+    days: daysPreview,
+    at: input.pickupAt,
+    skipDeals: Boolean(input.partnerAgreement),
+  });
 
   const selectedExtras = input.extraIds?.length
     ? await prisma.extra.findMany({
@@ -147,7 +175,6 @@ export async function createOnlineBookingDraft(input: {
       })
     : [];
 
-  const daysPreview = rentalDays(input.pickupAt, input.returnAt);
   const extrasTotal = calcExtrasTotal(
     selectedExtras.map((e) => ({
       dailyRate: e.dailyRate,
@@ -157,16 +184,43 @@ export async function createOnlineBookingDraft(input: {
     daysPreview
   );
 
-  const priced = priceRental({
-    dailyRate,
+  const pricedBase = priceRental({
+    dailyRate: dealPricing.dailyRate,
     pickupAt: input.pickupAt,
     returnAt: input.returnAt,
-    depositAmount,
+    depositAmount: dealPricing.depositAmount,
     extrasTotal,
     vatCategory: input.org.vatCategory,
     rules,
     categoryId: input.categoryId,
   });
+  const { discountAmount, freeDays } = finalizeDealDiscount({
+    averageDaily: pricedBase.averageDaily || dealPricing.dailyRate,
+    days: pricedBase.days,
+    deal: dealPricing.deal,
+  });
+  const priced =
+    discountAmount > 0
+      ? priceRental({
+          dailyRate: dealPricing.dailyRate,
+          pickupAt: input.pickupAt,
+          returnAt: input.returnAt,
+          depositAmount: dealPricing.depositAmount,
+          extrasTotal,
+          discountAmount,
+          vatCategory: input.org.vatCategory,
+          rules,
+          categoryId: input.categoryId,
+        })
+      : pricedBase;
+
+  const dealNote =
+    dealPricing.deal && freeDays > 0
+      ? `Deal: ${dealPricing.deal.title} (${dealPriceLabel(dealPricing.deal)}, −${freeDays} ημ.)`
+      : dealPricing.deal
+        ? `Deal: ${dealPricing.deal.title} (${dealPriceLabel(dealPricing.deal)})`
+        : null;
+  const notes = [input.notes, dealNote].filter(Boolean).join(" · ") || null;
 
   const customer = await prisma.customer.create({
     data: {
@@ -186,28 +240,30 @@ export async function createOnlineBookingDraft(input: {
   const booking = await prisma.booking.create({
     data: {
       code: makeBookingCode(input.org.name),
-      channel: "ONLINE",
+      channel: input.partnerAgreementId ? "PARTNER" : "ONLINE",
       status: input.pendingPayment ? "PENDING_PAYMENT" : "CONFIRMED",
       pickupAt: input.pickupAt,
       returnAt: input.returnAt,
       pickupPlace: vehicle.branch?.name,
       returnPlace: vehicle.branch?.name,
-      dailyRate: priced.averageDaily || dailyRate,
+      dailyRate: priced.averageDaily || dealPricing.dailyRate,
       days: priced.days,
       extrasTotal: priced.extrasTotal,
+      discountAmount,
       subtotal: priced.subtotal,
       vatAmount: priced.vatAmount,
       totalAmount: priced.totalAmount,
       depositAmount: priced.depositAmount,
       paymentStatus: input.pendingPayment ? "PENDING" : "UNPAID",
       coveragesJson: JSON.stringify(input.coverages || ["CDW"]),
-      notes: input.notes,
+      notes,
       customerId: customer.id,
       vehicleId: vehicle.id,
       pickupBranchId: input.pickupBranchId || vehicle.branchId,
       returnBranchId:
         input.returnBranchId || input.pickupBranchId || vehicle.branchId,
       organizationId: input.org.id,
+      partnerAgreementId: input.partnerAgreementId || null,
       extras: {
         create: selectedExtras.map((e) => {
           const unit =

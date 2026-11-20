@@ -3,8 +3,10 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { prisma } from "@/lib/prisma";
 import { PublicBookForm } from "@/components/public-book-form";
+import { PublicDealBanner } from "@/components/public-deal-banner";
 import { orgCanAcceptPayments } from "@/lib/stripe";
 import { brandingCssVars } from "@/lib/branding";
+import { toPublicDeals } from "@/lib/deals";
 import { sortByCategoryName } from "@/lib/utils";
 import { Card } from "@/components/ui";
 
@@ -20,11 +22,16 @@ export default async function PublicBookPage({
       categories: { where: { active: true } },
       branches: { where: { active: true } },
       extras: { where: { active: true }, orderBy: { name: "asc" } },
+      deals: {
+        where: { active: true },
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
+      },
     },
   });
 
   if (!org) notFound();
   const categories = sortByCategoryName(org.categories);
+  const publicDeals = toPublicDeals(org.deals, categories);
 
   const paymentsEnabled = orgCanAcceptPayments(org);
   const primary = org.brandPrimary || "#1b6ca8";
@@ -78,26 +85,32 @@ export default async function PublicBookPage({
         </h1>
         <p className="mt-2 text-muted">{tagline}</p>
 
+        <div className="mt-6">
+          <PublicDealBanner deals={publicDeals} primary={primary} />
+        </div>
+
         {categories.length === 0 ? (
-          <Card elevated className="mt-8">
+          <Card elevated className="mt-2">
             <p className="text-sm text-muted">
               Δεν υπάρχουν διαθέσιμες κατηγορίες ακόμα.
             </p>
           </Card>
         ) : (
-          <Card elevated className="mt-8" padding="md">
-            <Suspense fallback={<p className="text-sm text-muted">Φόρτωση…</p>}>
-              <PublicBookForm
-                token={token}
-                orgName={org.name}
-                categories={categories}
-                branches={org.branches}
-                extras={org.extras}
-                paymentsEnabled={paymentsEnabled}
-                brandPrimary={primary}
-              />
-            </Suspense>
-          </Card>
+          <div id="book-form" className="mt-2 scroll-mt-6">
+            <Card elevated padding="md">
+              <Suspense fallback={<p className="text-sm text-muted">Φόρτωση…</p>}>
+                <PublicBookForm
+                  token={token}
+                  orgName={org.name}
+                  categories={categories}
+                  branches={org.branches}
+                  extras={org.extras}
+                  paymentsEnabled={paymentsEnabled}
+                  brandPrimary={primary}
+                />
+              </Suspense>
+            </Card>
+          </div>
         )}
       </main>
     </div>

@@ -11,7 +11,11 @@ const schema = z.object({
   baseDailyRate: z.coerce.number().positive(),
   depositAmount: z.coerce.number().min(0).default(300),
   seats: z.coerce.number().int().optional().nullable(),
+  bags: z.coerce.number().int().optional().nullable(),
+  doors: z.coerce.number().int().optional().nullable(),
   transmission: z.string().optional().nullable(),
+  airConditioning: z.boolean().optional(),
+  hasGps: z.boolean().optional(),
   imageUrl: z.string().url().optional().nullable().or(z.literal("")),
 });
 
@@ -49,8 +53,14 @@ export async function POST(req: Request) {
         description: body.description || null,
         baseDailyRate: body.baseDailyRate,
         depositAmount: body.depositAmount,
-        seats: body.seats || null,
+        seats: body.seats ?? null,
+        bags: body.bags ?? null,
+        doors: body.doors ?? null,
         transmission: body.transmission || null,
+        ...(body.airConditioning !== undefined
+          ? { airConditioning: body.airConditioning }
+          : {}),
+        ...(body.hasGps !== undefined ? { hasGps: body.hasGps } : {}),
         imageUrl: body.imageUrl?.trim() || null,
         organizationId: session.organizationId,
       },

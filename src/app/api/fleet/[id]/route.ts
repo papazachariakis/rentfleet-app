@@ -17,6 +17,12 @@ const schema = z.object({
     .optional(),
   odometerKm: z.coerce.number().int().min(0).optional(),
   fuelType: z.string().optional().nullable(),
+  seats: z.coerce.number().int().min(1).max(20).optional(),
+  bags: z.coerce.number().int().min(0).max(20).optional(),
+  doors: z.coerce.number().int().min(0).max(10).optional(),
+  transmission: z.string().min(1).max(40).optional(),
+  airConditioning: z.boolean().optional(),
+  hasGps: z.boolean().optional(),
   categoryId: z.string().optional().nullable(),
   branchId: z.string().optional().nullable(),
   insuranceExpiry: z.string().optional().nullable(),
@@ -68,6 +74,16 @@ export async function PATCH(
           ? { odometerKm: body.odometerKm }
           : {}),
         ...(body.fuelType !== undefined ? { fuelType: body.fuelType } : {}),
+        ...(body.seats !== undefined ? { seats: body.seats } : {}),
+        ...(body.bags !== undefined ? { bags: body.bags } : {}),
+        ...(body.doors !== undefined ? { doors: body.doors } : {}),
+        ...(body.transmission
+          ? { transmission: body.transmission.trim() }
+          : {}),
+        ...(body.airConditioning !== undefined
+          ? { airConditioning: body.airConditioning }
+          : {}),
+        ...(body.hasGps !== undefined ? { hasGps: body.hasGps } : {}),
         ...(body.categoryId !== undefined
           ? { categoryId: body.categoryId }
           : {}),

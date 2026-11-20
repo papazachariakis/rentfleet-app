@@ -42,6 +42,8 @@ export function PublicBookForm({
   extras,
   paymentsEnabled,
   brandPrimary: _brandPrimary,
+  partnerToken,
+  partnerName,
 }: {
   token: string;
   orgName: string;
@@ -50,6 +52,9 @@ export function PublicBookForm({
   extras: Extra[];
   paymentsEnabled: boolean;
   brandPrimary?: string;
+  /** Ιδιωτικό token συμφωνίας broker/ξενοδοχείου */
+  partnerToken?: string;
+  partnerName?: string;
 }) {
   void _brandPrimary;
   void orgName;
@@ -73,7 +78,22 @@ export function PublicBookForm({
   const [availability, setAvailability] = useState<{
     available: boolean;
     count?: number;
-    quote?: { days: number; totalAmount: number; depositAmount: number };
+    quote?: {
+      days: number;
+      totalAmount: number;
+      depositAmount: number;
+      discountAmount?: number;
+      retailDailyRate?: number;
+      dealDailyRate?: number;
+      deal?: {
+        id: string;
+        title: string;
+        badge: string;
+        priceLabel: string;
+        freeDays: number;
+        discountType: string;
+      } | null;
+    };
     vehicles?: {
       id: string;
       make: string;
@@ -126,6 +146,7 @@ export function PublicBookForm({
       });
       if (branchId) qs.set("branchId", branchId);
       if (extraIds.length) qs.set("extraIds", extraIds.join(","));
+      if (partnerToken) qs.set("partnerToken", partnerToken);
       const res = await fetch(`/api/public/availability?${qs}`);
       const data = await res.json().catch(() => ({}));
       setChecking(false);
@@ -150,7 +171,7 @@ export function PublicBookForm({
       );
     }, 350);
     return () => clearTimeout(t);
-  }, [token, categoryId, pickupAt, returnAt, branchId, extraIds]);
+  }, [token, partnerToken, categoryId, pickupAt, returnAt, branchId, extraIds]);
 
   function onPickupChange(value: string) {
     setPickupAt(value);
@@ -174,6 +195,7 @@ export function PublicBookForm({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         token,
+        partnerToken: partnerToken || null,
         categoryId,
         vehicleId: vehicleId || null,
         pickupAt: new Date(pickupAt).toISOString(),
@@ -197,7 +219,12 @@ export function PublicBookForm({
       window.location.href = data.checkoutUrl;
       return;
     }
-    router.push(data.redirectTo || `/book/${token}/success?booking=${data.bookingId}`);
+    router.push(
+      data.redirectTo ||
+        (partnerToken
+          ? `/book/partner/${partnerToken}/success?booking=${data.bookingId}`
+          : `/book/${token}/success?booking=${data.bookingId}`)
+    );
   }
 
   const daysPreview = rentalDays(pickupAt, returnAt);
@@ -219,6 +246,12 @@ export function PublicBookForm({
       {cancelled ? (
         <p className="rounded-lg border border-warning/30 bg-amber-50 px-3 py-2 text-sm text-warning">
           Η πληρωμή ακυρώθηκε — μπορείς να δοκιμάσεις ξανά.
+        </p>
+      ) : null}
+
+      {partnerName ? (
+        <p className="rounded-lg border border-accent/25 bg-accent/5 px-3 py-2 text-sm text-ink">
+          Τιμές συμφωνίας: <strong>{partnerName}</strong>
         </p>
       ) : null}
 
@@ -295,27 +328,48 @@ export function PublicBookForm({
             {checking ? (
               <p className="text-muted">Έλεγχος διαθεσιμότητας…</p>
             ) : availability?.available ? (
-              <p>
-                <strong>{availability.count ?? availability.vehicles?.length ?? 0}</strong>{" "}
-                διαθέσιμα στην κατηγορία ·{" "}
-                <strong>
-                  {formatCurrency(
-                    availability.quote?.totalAmount ?? roughTotal
-                  )}
-                </strong>{" "}
-                για {availability.quote?.days ?? daysPreview} ημέρες
-                {availability.quote?.depositAmount ? (
-                  <span className="text-muted">
-                    {" "}
-                    · εγγύηση{" "}
-                    {formatCurrency(availability.quote.depositAmount)}
-                  </span>
+              <div>
+                <p>
+                  <strong>
+                    {availability.count ?? availability.vehicles?.length ?? 0}
+                  </strong>{" "}
+                  διαθέσιμα στην κατηγορία ·{" "}
+                  <strong>
+                    {formatCurrency(
+                      availability.quote?.totalAmount ?? roughTotal
+                    )}
+                  </strong>{" "}
+                  για {availability.quote?.days ?? daysPreview} ημέρες
+                  {availability.quote?.depositAmount ? (
+                    <span className="text-muted">
+                      {" "}
+                      · εγγύηση{" "}
+                      {formatCurrency(availability.quote.depositAmount)}
+                    </span>
+                  ) : null}
+                </p>
+                {availability.quote?.deal ? (
+                  <p className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+                    <strong>{availability.quote.deal.badge}:</strong>{" "}
+                    {availability.quote.deal.title}
+                    {availability.quote.deal.priceLabel
+                      ? ` · ${availability.quote.deal.priceLabel}`
+                      : ""}
+                    {availability.quote.deal.freeDays > 0
+                      ? ` · −${availability.quote.deal.freeDays} δωρεάν ημέρα${
+                          availability.quote.deal.freeDays > 1 ? "ες" : ""
+                        }`
+                      : ""}
+                    {availability.quote.discountAmount
+                      ? ` (−${formatCurrency(availability.quote.discountAmount)})`
+                      : ""}
+                  </p>
                 ) : null}
                 <span className="mt-1 block text-xs text-muted">
                   24ώρες = 1 ημέρα · έως +3 ώρες χωρίς έξτρα · &gt;27ώρες = +1
                   ημέρα
                 </span>
-              </p>
+              </div>
             ) : (
               <p className="text-danger">
                 Δεν υπάρχει διαθέσιμο όχημα για αυτές τις ημερομηνίες.
