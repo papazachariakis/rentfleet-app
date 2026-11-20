@@ -98,7 +98,8 @@ export function BookingOps({
     status === "DRAFT" ||
     status === "PENDING_PAYMENT" ||
     status === "CONFIRMED";
-  const canCancel = canEdit;
+  const canCancel =
+    canEdit || status === "CHECKED_OUT";
   const canDelete =
     status === "DRAFT" || status === "CANCELLED" || status === "NO_SHOW";
   const canRetryLedger =
@@ -497,21 +498,53 @@ export function BookingOps({
             ) : null}
           </div>
         </Card>
-      ) : canDelete ? (
+      ) : canCancel || canDelete ? (
         <Card>
-          <h2 className="font-display text-lg">Διαγραφή</h2>
-          <p className="mt-1 text-sm text-muted">
-            Οριστική αφαίρεση ακυρωμένης / draft κράτησης από τη λίστα.
-          </p>
-          <div className="mt-4">
-            <Button
-              type="button"
-              variant="danger"
-              disabled={loading}
-              onClick={() => void removeBooking()}
-            >
-              Διαγραφή
-            </Button>
+          <h2 className="font-display text-lg">
+            {canCancel ? "Ακύρωση" : "Διαγραφή"}
+          </h2>
+          {status === "CHECKED_OUT" ? (
+            <p className="mt-1 text-sm text-muted">
+              Το όχημα είναι σε παραλαβή. Η ακύρωση ελευθερώνει το όχημα· μετά
+              μπορείς να τη διαγράψεις.
+            </p>
+          ) : (
+            <p className="mt-1 text-sm text-muted">
+              Οριστική αφαίρεση ακυρωμένης / draft κράτησης από τη λίστα.
+            </p>
+          )}
+          <div className="mt-4 flex flex-wrap gap-2">
+            {canCancel ? (
+              <Button
+                type="button"
+                variant="danger"
+                disabled={loading}
+                onClick={() => {
+                  if (
+                    !confirm(
+                      status === "CHECKED_OUT"
+                        ? "Ακύρωση ενώ είναι σε check-out; Το όχημα θα ελευθερωθεί."
+                        : "Ακύρωση κράτησης;"
+                    )
+                  ) {
+                    return;
+                  }
+                  patch({ action: "cancel" }, "Ακυρώθηκε");
+                }}
+              >
+                Ακύρωση
+              </Button>
+            ) : null}
+            {canDelete ? (
+              <Button
+                type="button"
+                variant="danger"
+                disabled={loading}
+                onClick={() => void removeBooking()}
+              >
+                Διαγραφή
+              </Button>
+            ) : null}
           </div>
         </Card>
       ) : null}

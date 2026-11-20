@@ -30,7 +30,8 @@ function canCancel(status: string) {
   return (
     status === "DRAFT" ||
     status === "PENDING_PAYMENT" ||
-    status === "CONFIRMED"
+    status === "CONFIRMED" ||
+    status === "CHECKED_OUT"
   );
 }
 
@@ -45,8 +46,16 @@ export function BookingsList({ bookings }: { bookings: BookingListItem[] }) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
 
-  async function cancel(id: string, code: string | null) {
-    if (!confirm(`Ακύρωση κράτησης ${code || ""};`.trim())) return;
+  async function cancel(id: string, code: string | null, status: string) {
+    const checkedOutWarn =
+      status === "CHECKED_OUT"
+        ? " Το όχημα είναι ήδη σε παραλαβή — θα ελευθερωθεί."
+        : "";
+    if (
+      !confirm(`Ακύρωση κράτησης ${code || ""};${checkedOutWarn}`.trim())
+    ) {
+      return;
+    }
     setBusyId(id);
     setMsg("");
     const res = await fetch(`/api/bookings/${id}`, {
@@ -148,7 +157,7 @@ export function BookingsList({ bookings }: { bookings: BookingListItem[] }) {
                         variant="secondary"
                         size="sm"
                         disabled={busy}
-                        onClick={() => void cancel(b.id, b.code)}
+                        onClick={() => void cancel(b.id, b.code, b.status)}
                       >
                         Ακύρωση
                       </Button>

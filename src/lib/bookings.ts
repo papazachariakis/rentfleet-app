@@ -53,12 +53,15 @@ export async function cancelBooking(input: {
   if (["CANCELLED", "NO_SHOW", "CHECKED_IN"].includes(booking.status)) {
     throw new Error("INVALID_STATUS");
   }
-  if (booking.status === "CHECKED_OUT") {
-    throw new Error("CHECKED_OUT");
-  }
 
   const status = input.reason || "CANCELLED";
-  const notes = [booking.notes, input.notes].filter(Boolean).join(" · ") || null;
+  const forceNote =
+    booking.status === "CHECKED_OUT"
+      ? "Ακυρώθηκε μετά από check-out (χειροκίνητα)"
+      : null;
+  const notes =
+    [booking.notes, input.notes, forceNote].filter(Boolean).join(" · ") ||
+    null;
 
   const updated = await prisma.$transaction(async (tx) => {
     const b = await tx.booking.update({
