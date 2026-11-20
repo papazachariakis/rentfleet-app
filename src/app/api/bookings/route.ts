@@ -9,12 +9,17 @@ import {
   ensureAgreement,
   loadOrgPriceRules,
 } from "@/lib/bookings";
-import { calcExtrasTotal, resolveVehicleRates } from "@/lib/pricing";
+import {
+  calcExtrasTotal,
+  resolvePartnerRates,
+  resolveVehicleRates,
+} from "@/lib/pricing";
 import { sendBookingConfirmationEmail } from "@/lib/booking-email";
 import { canWriteOps } from "@/lib/permissions";
 import { checkLicenseForVehicleType } from "@/lib/license-categories";
 import { buildLicenseScanPdf } from "@/lib/license-scan-pdf";
 import { rentalDays } from "@/lib/utils";
+import { loadActivePartnerAgreement } from "@/lib/partners";
 
 const schema = z.object({
   vehicleId: z.string().min(1),
@@ -40,6 +45,10 @@ const schema = z.object({
   returnBranchId: z.string().optional().nullable(),
   dailyRate: z.coerce.number().positive().optional(),
   depositAmount: z.coerce.number().min(0).optional(),
+  discountAmount: z.coerce.number().min(0).optional(),
+  /** Desk: σταθερή συμφωνημένη τιμή — χωρίς κανόνες περιόδου καταλόγου */
+  manualPricing: z.boolean().optional(),
+  partnerAgreementId: z.string().optional().nullable(),
   coverages: z.array(z.string()).optional(),
   extraIds: z.array(z.string()).optional(),
   notes: z.string().optional(),
@@ -188,9 +197,35 @@ export async function POST(req: Request) {
       select: { name: true, vatCategory: true },
     });
 
-    const vehicleRates = resolveVehicleRates(vehicle);
+    let partnerAgreementId: string | null = null;
+    let partnerAgreement = null as Awaited<
+      ReturnType<typeof loadActivePartnerAgreement>
+    >;
+    if (body.partnerAgreementId) {
+      partnerAgreement = await loadActivePartnerAgreement(
+        orgId,
+        body.partnerAgreementId
+      );
+      if (!partnerAgreement) {
+        return NextResponse.json(
+          { error: "Η συμφωνία partner δεν βρέθηκε ή δεν είναι ενεργή" },
+          { status: 400 }
+        );
+      }
+      partnerAgreementId = partnerAgreement.id;
+    }
+
+    const vehicleRates = partnerAgreement
+      ? resolvePartnerRates(vehicle, partnerAgreement)
+      : resolveVehicleRates(vehicle);
     const dailyRate = body.dailyRate ?? vehicleRates.dailyRate;
     const depositAmount = body.depositAmount ?? vehicleRates.depositAmount;
+    const discountAmount = body.discountAmount ?? 0;
+    const catalogRate = vehicleRates.dailyRate;
+    const manualPricing =
+      body.manualPricing === true ||
+      (body.dailyRate != null &&
+        Math.round(body.dailyRate * 100) !== Math.round(catalogRate * 100));
 
     const selectedExtras = body.extraIds?.length
       ? await prisma.extra.findMany({
@@ -202,7 +237,9 @@ export async function POST(req: Request) {
         })
       : [];
 
-    const rules = await loadOrgPriceRules(orgId, vehicle.categoryId);
+    const rules = manualPricing
+      ? []
+      : await loadOrgPriceRules(orgId, vehicle.categoryId);
     const daysPreview = rentalDays(pickupAt, returnAt);
     const extrasTotal = calcExtrasTotal(
       selectedExtras.map((e) => ({
@@ -219,6 +256,7 @@ export async function POST(req: Request) {
       returnAt,
       depositAmount,
       extrasTotal,
+      discountAmount,
       vatCategory: org?.vatCategory ?? 1,
       rules,
       categoryId: vehicle.categoryId,
@@ -232,7 +270,7 @@ export async function POST(req: Request) {
     const booking = await prisma.booking.create({
       data: {
         code: makeBookingCode(org?.name || "RF"),
-        channel: "DESK",
+        channel: partnerAgreementId ? "PARTNER" : "DESK",
         status: "CONFIRMED",
         pickupAt,
         returnAt,
@@ -241,6 +279,7 @@ export async function POST(req: Request) {
         dailyRate: priced.averageDaily || dailyRate,
         days: priced.days,
         extrasTotal: priced.extrasTotal,
+        discountAmount,
         subtotal: priced.subtotal,
         vatAmount: priced.vatAmount,
         totalAmount: priced.totalAmount,
@@ -253,6 +292,7 @@ export async function POST(req: Request) {
         pickupBranchId,
         returnBranchId,
         organizationId: orgId,
+        partnerAgreementId,
         extras: {
           create: selectedExtras.map((e) => {
             const unit =

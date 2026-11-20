@@ -31,6 +31,9 @@ type Props = {
   vehicleId: string | null;
   vehicles?: VehicleOption[];
   failedInvoiceId?: string | null;
+  dailyRate?: number;
+  depositAmount?: number;
+  discountAmount?: number;
 };
 
 async function filesToDataUrls(files: FileList | null, max = 6) {
@@ -71,6 +74,9 @@ export function BookingOps({
   vehicleId,
   vehicles = [],
   failedInvoiceId,
+  dailyRate: initialDailyRate = 0,
+  depositAmount: initialDeposit = 0,
+  discountAmount: initialDiscount = 0,
 }: Props) {
   const router = useRouter();
   const [odometerKm, setOdometerKm] = useState(String(defaultOdometer ?? ""));
@@ -81,6 +87,9 @@ export function BookingOps({
   const [pickup, setPickup] = useState(toLocalInput(pickupAt));
   const [ret, setRet] = useState(toLocalInput(returnAt));
   const [vehId, setVehId] = useState(vehicleId || "");
+  const [dailyRate, setDailyRate] = useState(String(initialDailyRate || ""));
+  const [deposit, setDeposit] = useState(String(initialDeposit || ""));
+  const [discount, setDiscount] = useState(String(initialDiscount || "0"));
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
   const photoRef = useRef<HTMLInputElement>(null);
@@ -90,6 +99,8 @@ export function BookingOps({
     status === "PENDING_PAYMENT" ||
     status === "CONFIRMED";
   const canCancel = canEdit;
+  const canDelete =
+    status === "DRAFT" || status === "CANCELLED" || status === "NO_SHOW";
   const canRetryLedger =
     (status === "CHECKED_OUT" || status === "CHECKED_IN") &&
     (aadeLedgerStatus === "FAILED" || aadeLedgerStatus === "PENDING");
@@ -192,6 +203,21 @@ export function BookingOps({
         ? `myDATA OK · ${data.invoice.number}`
         : data.invoice?.errorMessage || "Επανυποβολή ολοκληρώθηκε"
     );
+    router.refresh();
+  }
+
+  async function removeBooking() {
+    if (!confirm("Οριστική διαγραφή κράτησης; Δεν αναιρείται.")) return;
+    setLoading(true);
+    setMsg("");
+    const res = await fetch(`/api/bookings/${bookingId}`, { method: "DELETE" });
+    const data = await res.json().catch(() => ({}));
+    setLoading(false);
+    if (!res.ok) {
+      setMsg(data.error || "Αποτυχία διαγραφής");
+      return;
+    }
+    router.push("/bookings");
     router.refresh();
   }
 
@@ -365,14 +391,55 @@ export function BookingOps({
                 </select>
               </div>
             ) : null}
+            <div>
+              <Label>Ημερήσια τιμή συμφωνίας (€)</Label>
+              <Input
+                type="number"
+                min={1}
+                step="0.01"
+                value={dailyRate}
+                onChange={(e) => setDailyRate(e.target.value)}
+              />
+              <p className="mt-1.5 text-xs text-muted">
+                π.χ. κατάλογος 100€ → συμφωνία 90€/ημέρα
+              </p>
+            </div>
+            <div>
+              <Label>Εγγύηση (€)</Label>
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                value={deposit}
+                onChange={(e) => setDeposit(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label>Έκπτωση (€)</Label>
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                value={discount}
+                onChange={(e) => setDiscount(e.target.value)}
+              />
+            </div>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
             <Button
               type="button"
-              disabled={loading || !isReturnAfterPickup(pickup, ret)}
+              disabled={
+                loading ||
+                !isReturnAfterPickup(pickup, ret) ||
+                !(Number(dailyRate) > 0)
+              }
               onClick={() => {
                 if (!isReturnAfterPickup(pickup, ret)) {
                   setMsg(RETURN_AFTER_PICKUP_MSG);
+                  return;
+                }
+                if (!(Number(dailyRate) > 0)) {
+                  setMsg("Βάλε έγκυρη ημερήσια τιμή");
                   return;
                 }
                 patch(
@@ -381,6 +448,10 @@ export function BookingOps({
                     pickupAt: new Date(pickup).toISOString(),
                     returnAt: new Date(ret).toISOString(),
                     vehicleId: vehId || null,
+                    dailyRate: Number(dailyRate),
+                    depositAmount: Number(deposit) || 0,
+                    discountAmount: Number(discount) || 0,
+                    manualPricing: true,
                   },
                   "Ενημερώθηκε"
                 );
@@ -414,6 +485,33 @@ export function BookingOps({
                 </Button>
               </>
             ) : null}
+            {canDelete ? (
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={loading}
+                onClick={() => void removeBooking()}
+              >
+                Διαγραφή
+              </Button>
+            ) : null}
+          </div>
+        </Card>
+      ) : canDelete ? (
+        <Card>
+          <h2 className="font-display text-lg">Διαγραφή</h2>
+          <p className="mt-1 text-sm text-muted">
+            Οριστική αφαίρεση ακυρωμένης / draft κράτησης από τη λίστα.
+          </p>
+          <div className="mt-4">
+            <Button
+              type="button"
+              variant="danger"
+              disabled={loading}
+              onClick={() => void removeBooking()}
+            >
+              Διαγραφή
+            </Button>
           </div>
         </Card>
       ) : null}

@@ -12,9 +12,11 @@ import {
   RETURN_AFTER_PICKUP_MSG,
   returnOneHourAfterPickup,
   toLocalInput,
+  partnerKindLabel,
   vehicleTypeLabel,
 } from "@/lib/utils";
 import { checkLicenseForVehicleType } from "@/lib/license-categories";
+import { resolvePartnerRates } from "@/lib/pricing";
 
 type Category = {
   id: string;
@@ -61,6 +63,18 @@ type Extra = {
   flatRate: number | null;
 };
 
+type Partner = {
+  id: string;
+  name: string;
+  kind: string;
+  discountPercent: number | null;
+  rates: {
+    categoryId: string;
+    dailyRate: number;
+    depositAmount?: number | null;
+  }[];
+};
+
 const COVERAGES = [
   { id: "CDW", label: "CDW — Ίδιες ζημιές" },
   { id: "SCDW", label: "SCDW — Πλήρης απαλλαγή" },
@@ -75,6 +89,8 @@ export function NewBookingForm() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [extras, setExtras] = useState<Extra[]>([]);
+  const [partners, setPartners] = useState<Partner[]>([]);
+  const [partnerAgreementId, setPartnerAgreementId] = useState("");
   const [extraIds, setExtraIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -92,6 +108,8 @@ export function NewBookingForm() {
   );
   const [pickupBranchId, setPickupBranchId] = useState("");
   const [dailyRate, setDailyRate] = useState("");
+  const [catalogDailyRate, setCatalogDailyRate] = useState<number | null>(null);
+  const [rateManual, setRateManual] = useState(false);
   const [depositAmount, setDepositAmount] = useState("");
   const [coverages, setCoverages] = useState<string[]>(["CDW"]);
   const [notes, setNotes] = useState("");
@@ -141,6 +159,7 @@ export function NewBookingForm() {
         setCustomers(d.customers || []);
         setBranches(d.branches || []);
         setExtras(d.extras || []);
+        setPartners(d.partners || []);
       })
       .catch((err) => {
         if (err?.name === "AbortError") return;
@@ -177,19 +196,42 @@ export function NewBookingForm() {
     }
   }, [filteredVehicles, vehicleId, pickupBranchId]);
 
+  const selectedPartner = useMemo(
+    () => partners.find((p) => p.id === partnerAgreementId) || null,
+    [partners, partnerAgreementId]
+  );
+
   useEffect(() => {
     if (!selectedVehicle) return;
-    setDailyRate(String(selectedVehicle.category?.baseDailyRate ?? 40));
-    setDepositAmount(String(selectedVehicle.category?.depositAmount ?? 300));
+    const rates = resolvePartnerRates(
+      {
+        categoryId: selectedVehicle.categoryId,
+        category: selectedVehicle.category,
+      },
+      selectedPartner
+    );
+    setCatalogDailyRate(rates.dailyRate);
+    if (!rateManual) {
+      setDailyRate(String(rates.dailyRate));
+      setDepositAmount(String(rates.depositAmount));
+    }
     if (selectedVehicle.branch?.id) setPickupBranchId(selectedVehicle.branch.id);
-  }, [selectedVehicle]);
+  }, [selectedVehicle, selectedPartner, rateManual]);
 
   const estimate = useMemo(() => {
     const rate = Number(dailyRate) || 0;
     const days = rentalDays(pickupAt, returnAt);
     const total = rate * days;
-    return { days, total };
-  }, [dailyRate, pickupAt, returnAt]);
+    const catalogTotal =
+      catalogDailyRate != null ? catalogDailyRate * days : null;
+    return { days, total, catalogTotal };
+  }, [dailyRate, catalogDailyRate, pickupAt, returnAt]);
+
+  const agreedDiffers =
+    catalogDailyRate != null &&
+    Number(dailyRate) > 0 &&
+    Math.round(Number(dailyRate) * 100) !==
+      Math.round(catalogDailyRate * 100);
 
   const licenseCheck = useMemo(() => {
     if (!selectedVehicle || !customer.licenseCategories.trim()) return null;
@@ -238,6 +280,8 @@ export function NewBookingForm() {
       returnBranchId: pickupBranchId || null,
       dailyRate: Number(dailyRate),
       depositAmount: Number(depositAmount),
+      manualPricing: rateManual || agreedDiffers,
+      partnerAgreementId: partnerAgreementId || null,
       coverages,
       extraIds,
       notes,
@@ -272,6 +316,29 @@ export function NewBookingForm() {
       <Card>
         <h2 className="font-display text-lg">Όχημα & ημερομηνίες</h2>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="md:col-span-2">
+            <Label>Συμφωνία broker / ξενοδοχείου</Label>
+            <select
+              className="w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm"
+              value={partnerAgreementId}
+              onChange={(e) => setPartnerAgreementId(e.target.value)}
+            >
+              <option value="">— Λιανικές τιμές (χωρίς συμφωνία) —</option>
+              {partners.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} · {partnerKindLabel(p.kind)}
+                  {p.discountPercent != null
+                    ? ` · έκπτωση ${p.discountPercent}%`
+                    : ""}
+                </option>
+              ))}
+            </select>
+            {selectedPartner ? (
+              <p className="mt-1 text-xs text-muted">
+                Οι τιμές ενημερώνονται από τον τιμοκατάλογο της συμφωνίας.
+              </p>
+            ) : null}
+          </div>
           <div>
             <Label>Κατηγορία</Label>
             <select
@@ -361,15 +428,44 @@ export function NewBookingForm() {
             </select>
           </div>
           <div>
-            <Label>Ημερήσια τιμή (€)</Label>
+            <Label>Ημερήσια τιμή συμφωνίας (€)</Label>
             <Input
               type="number"
               min={1}
               step="0.01"
               value={dailyRate}
-              onChange={(e) => setDailyRate(e.target.value)}
+              onChange={(e) => {
+                setRateManual(true);
+                setDailyRate(e.target.value);
+              }}
               required
             />
+            {catalogDailyRate != null ? (
+              <p className="mt-1.5 text-xs text-muted">
+                Κατάλογος: {formatCurrency(catalogDailyRate)}/ημέρα
+                {agreedDiffers ? (
+                  <span className="text-accent">
+                    {" "}
+                    · συμφωνία {formatCurrency(Number(dailyRate) || 0)}/ημέρα
+                  </span>
+                ) : null}
+                {rateManual || agreedDiffers ? (
+                  <>
+                    {" · "}
+                    <button
+                      type="button"
+                      className="font-medium text-accent hover:underline"
+                      onClick={() => {
+                        setRateManual(false);
+                        setDailyRate(String(catalogDailyRate));
+                      }}
+                    >
+                      Επαναφορά καταλόγου
+                    </button>
+                  </>
+                ) : null}
+              </p>
+            ) : null}
           </div>
           <div>
             <Label>Εγγύηση (€)</Label>
@@ -402,10 +498,17 @@ export function NewBookingForm() {
             {formatCurrency(estimate.total)}
           </strong>{" "}
           (με ΦΠΑ)
+          {agreedDiffers && estimate.catalogTotal != null ? (
+            <span className="text-muted">
+              {" "}
+              · κατάλογος θα ήταν {formatCurrency(estimate.catalogTotal)}
+            </span>
+          ) : null}
         </p>
         <p className="mt-1 text-xs text-muted">
-          Χρέωση: 24 ώρες = 1 ημέρα · έως +3 ώρες χωρίς έξτρα · πάνω από 27
-          ώρες χρεώνεται επιπλέον ημέρα.
+          Desk: άλλαξε την ημερήσια τιμή αν συμφωνήσεις διαφορετικά με τον
+          πελάτη (π.χ. 100 → 90). Χρέωση: 24ώρες = 1 ημέρα · έως +3 ώρες χωρίς
+          έξτρα.
         </p>
       </Card>
 

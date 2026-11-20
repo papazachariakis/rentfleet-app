@@ -94,13 +94,61 @@ export async function cancelBooking(input: {
   return updated;
 }
 
-/** Αλλαγή ημερομηνιών / οχήματος με έλεγχο διαθεσιμότητας + επανυπολογισμό τιμής */
+/** Οριστική διαγραφή — μόνο DRAFT / CANCELLED / NO_SHOW */
+export async function deleteBooking(input: {
+  bookingId: string;
+  organizationId: string;
+}) {
+  const booking = await prisma.booking.findFirst({
+    where: { id: input.bookingId, organizationId: input.organizationId },
+    include: { vehicle: true },
+  });
+  if (!booking) throw new Error("NOT_FOUND");
+  if (!["DRAFT", "CANCELLED", "NO_SHOW"].includes(booking.status)) {
+    throw new Error("INVALID_STATUS");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.invoice.updateMany({
+      where: { bookingId: booking.id },
+      data: { bookingId: null },
+    });
+    await tx.booking.delete({ where: { id: booking.id } });
+    if (booking.vehicleId && booking.vehicle?.status === "RENTED") {
+      const otherOpen = await tx.booking.count({
+        where: {
+          vehicleId: booking.vehicleId,
+          status: "CHECKED_OUT",
+        },
+      });
+      if (otherOpen === 0) {
+        await tx.vehicle.update({
+          where: { id: booking.vehicleId },
+          data: { status: "AVAILABLE" },
+        });
+      }
+    }
+  });
+
+  return { ok: true as const };
+}
+
+/** Αλλαγή ημερομηνιών / οχήματος / τιμής desk με έλεγχο διαθεσιμότητας */
 export async function rescheduleBooking(input: {
   bookingId: string;
   organizationId: string;
   pickupAt?: Date;
   returnAt?: Date;
   vehicleId?: string | null;
+  /** Συμφωνημένη ημερήσια τιμή desk (override καταλόγου) */
+  dailyRate?: number;
+  depositAmount?: number;
+  discountAmount?: number;
+  /**
+   * true = σταθερή τιμή συμφωνίας (χωρίς κανόνες περιόδου).
+   * Default true όταν δίνεται dailyRate ή όταν κρατάμε την υπάρχουσα τιμή κράτησης.
+   */
+  manualPricing?: boolean;
 }) {
   const booking = await prisma.booking.findFirst({
     where: { id: input.bookingId, organizationId: input.organizationId },
@@ -138,21 +186,34 @@ export async function rescheduleBooking(input: {
   if (conflicts.hasConflict) throw new Error("CONFLICT");
 
   const dailyRate =
-    vehicle.category?.baseDailyRate || booking.dailyRate;
-  const rules = await loadOrgPriceRules(
-    input.organizationId,
-    vehicle.categoryId
-  );
+    input.dailyRate != null && input.dailyRate > 0
+      ? input.dailyRate
+      : booking.dailyRate;
+  if (!(dailyRate > 0)) throw new Error("INVALID_RATE");
+
+  const depositAmount =
+    input.depositAmount != null
+      ? input.depositAmount
+      : booking.depositAmount;
+  const discountAmount =
+    input.discountAmount != null
+      ? input.discountAmount
+      : booking.discountAmount;
+
+  const manualPricing = input.manualPricing ?? true;
+  const rules = manualPricing
+    ? []
+    : await loadOrgPriceRules(input.organizationId, vehicle.categoryId);
+
   const priced = priceRental({
     dailyRate,
     pickupAt,
     returnAt,
     extrasTotal: booking.extrasTotal,
     insuranceTotal: booking.insuranceTotal,
-    discountAmount: booking.discountAmount,
+    discountAmount,
     vatCategory: booking.organization.vatCategory,
-    depositAmount:
-      vehicle.category?.depositAmount ?? booking.depositAmount,
+    depositAmount,
     rules,
     categoryId: vehicle.categoryId,
   });
@@ -165,6 +226,7 @@ export async function rescheduleBooking(input: {
       vehicleId,
       dailyRate: priced.averageDaily || dailyRate,
       days: priced.days,
+      discountAmount,
       subtotal: priced.subtotal,
       vatAmount: priced.vatAmount,
       totalAmount: priced.totalAmount,
@@ -257,6 +319,7 @@ export function priceRental(input: {
   discountAmount?: number;
   vatCategory?: number;
   depositAmount?: number;
+  /** Κενό = σταθερή ημερήσια (desk override / χωρίς κανόνες περιόδου) */
   rules?: PriceRuleLike[];
   categoryId?: string | null;
 }) {

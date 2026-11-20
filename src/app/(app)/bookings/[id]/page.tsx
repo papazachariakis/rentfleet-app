@@ -7,6 +7,7 @@ import { BookingOps } from "@/components/booking-ops";
 import {
   formatCurrency,
   formatDateTime,
+  partnerKindLabel,
   vehicleTypeLabel,
 } from "@/lib/utils";
 
@@ -28,6 +29,7 @@ export default async function BookingDetailPage({
         pickupBranch: true,
         returnBranch: true,
         agreement: true,
+        partnerAgreement: { select: { id: true, name: true, kind: true } },
         inspections: { orderBy: { inspectedAt: "desc" } },
         invoices: { orderBy: { issuedAt: "desc" } },
       },
@@ -150,6 +152,18 @@ export default async function BookingDetailPage({
                 <dt className="text-muted">Κανάλι</dt>
                 <dd>{booking.channel}</dd>
               </div>
+              {booking.partnerAgreement ? (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted">Συμφωνία</dt>
+                  <dd>
+                    {booking.partnerAgreement.name}
+                    <span className="text-muted">
+                      {" "}
+                      · {partnerKindLabel(booking.partnerAgreement.kind)}
+                    </span>
+                  </dd>
+                </div>
+              ) : null}
               <div className="flex justify-between gap-4">
                 <dt className="text-muted">Όχημα</dt>
                 <dd>
@@ -170,6 +184,16 @@ export default async function BookingDetailPage({
                 <dt className="text-muted">Ημέρες</dt>
                 <dd>{booking.days}</dd>
               </div>
+              <div className="flex justify-between gap-4">
+                <dt className="text-muted">Ημερήσια</dt>
+                <dd>{formatCurrency(booking.dailyRate)}</dd>
+              </div>
+              {booking.discountAmount > 0 ? (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted">Έκπτωση</dt>
+                  <dd>{formatCurrency(booking.discountAmount)}</dd>
+                </div>
+              ) : null}
               <div className="flex justify-between gap-4">
                 <dt className="text-muted">Σύνολο</dt>
                 <dd className="font-medium">
@@ -311,6 +335,9 @@ export default async function BookingDetailPage({
             vehicleId={booking.vehicleId}
             vehicles={vehicles}
             failedInvoiceId={failedInvoice?.id}
+            dailyRate={booking.dailyRate}
+            depositAmount={booking.depositAmount}
+            discountAmount={booking.discountAmount}
           />
         </div>
       </div>

@@ -2,18 +2,13 @@ import Link from "next/link";
 import { getSession } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import {
-  Badge,
   Card,
-  DataTable,
   EmptyState,
   PageHeader,
-  TBody,
-  THead,
-  Td,
-  Th,
   buttonClass,
 } from "@/components/ui";
-import { formatCurrency, formatDateTime, vehicleTypeLabel } from "@/lib/utils";
+import { BookingsList } from "@/components/bookings-list";
+import { vehicleTypeLabel } from "@/lib/utils";
 
 export default async function BookingsPage() {
   const session = await getSession();
@@ -25,6 +20,20 @@ export default async function BookingsPage() {
     orderBy: { pickupAt: "desc" },
     take: 50,
   });
+
+  const rows = bookings.map((b) => ({
+    id: b.id,
+    code: b.code,
+    status: b.status,
+    paymentStatus: b.paymentStatus,
+    aadeLedgerStatus: b.aadeLedgerStatus,
+    totalAmount: b.totalAmount,
+    pickupAt: b.pickupAt.toISOString(),
+    customerName: `${b.customer.firstName} ${b.customer.lastName}`,
+    vehicleLabel: b.vehicle
+      ? `${b.vehicle.plateNumber} (${vehicleTypeLabel(b.vehicle.vehicleType)})`
+      : null,
+  }));
 
   return (
     <div>
@@ -51,67 +60,7 @@ export default async function BookingsPage() {
           />
         </Card>
       ) : (
-        <DataTable>
-          <THead>
-            <tr>
-              <Th>Κωδικός</Th>
-              <Th>Πελάτης</Th>
-              <Th>Όχημα</Th>
-              <Th>Παραλαβή</Th>
-              <Th>Κατάσταση</Th>
-              <Th>Πληρωμή</Th>
-              <Th>ΑΑΔΕ</Th>
-              <Th>Ποσό</Th>
-            </tr>
-          </THead>
-          <TBody>
-            {bookings.map((b) => (
-              <tr key={b.id} className="transition hover:bg-slate-50/80">
-                <Td className="font-medium">
-                  <Link
-                    href={`/bookings/${b.id}`}
-                    className="text-accent hover:underline"
-                  >
-                    {b.code || "—"}
-                  </Link>
-                </Td>
-                <Td>
-                  {b.customer.firstName} {b.customer.lastName}
-                </Td>
-                <Td>
-                  {b.vehicle
-                    ? `${b.vehicle.plateNumber} (${vehicleTypeLabel(b.vehicle.vehicleType)})`
-                    : "—"}
-                </Td>
-                <Td>{formatDateTime(b.pickupAt)}</Td>
-                <Td>
-                  <Badge tone="accent">{b.status}</Badge>
-                </Td>
-                <Td>
-                  <Badge
-                    tone={b.paymentStatus === "PAID" ? "success" : "warning"}
-                  >
-                    {b.paymentStatus}
-                  </Badge>
-                </Td>
-                <Td>
-                  <Badge
-                    tone={
-                      b.aadeLedgerStatus === "OK"
-                        ? "success"
-                        : b.aadeLedgerStatus === "FAILED"
-                          ? "danger"
-                          : "neutral"
-                    }
-                  >
-                    {b.aadeLedgerStatus}
-                  </Badge>
-                </Td>
-                <Td>{formatCurrency(b.totalAmount)}</Td>
-              </tr>
-            ))}
-          </TBody>
-        </DataTable>
+        <BookingsList bookings={rows} />
       )}
     </div>
   );
